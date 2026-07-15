@@ -11,8 +11,10 @@ the actual scheduling.
 from __future__ import annotations
 
 import logging
+import time
 
 import discord
+from discord.ext import tasks
 
 from bot import strings
 from bot.constants import IMMINENT_THRESHOLD_MINUTES
@@ -50,6 +52,27 @@ class PerpetualMessageManager:
     def __init__(self, storage: Storage) -> None:
         self.storage = storage
         self._dirty = False
+        self._loop: tasks.Loop | None = None
+
+    def start(self, bot: discord.Client) -> None:
+        """Starts the background loop that flushes at most once per minute."""
+        if self._loop is not None:
+            return
+
+        @tasks.loop(seconds=60)
+        async def loop() -> None:
+            await self.flush_if_dirty(bot, time.time())
+
+        @loop.before_loop
+        async def before() -> None:
+            await bot.wait_until_ready()
+
+        self._loop = loop
+        self._loop.start()
+
+    def stop(self) -> None:
+        if self._loop is not None:
+            self._loop.cancel()
 
     def mark_dirty(self) -> None:
         self._dirty = True

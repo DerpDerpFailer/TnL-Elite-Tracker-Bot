@@ -1,0 +1,257 @@
+"""Admin-only /elite-config command group.
+
+Gated two ways: `default_permissions=Manage Server` (Discord's own default,
+which guild admins can further customize per-role from Server Settings ->
+Integrations), plus a code-level `interaction_check` that also allows the
+guild-configured admin role stored in elite.json (see `admin-role` below) —
+this is what "un rôle admin configurable" refers to in the spec, since it
+must be settable from somewhere.
+"""
+from __future__ import annotations
+
+import logging
+import time
+from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfoNotFoundError
+
+import discord
+from discord import app_commands
+
+from bot import domain, strings
+from bot.autocomplete import zone_autocomplete
+from bot.constants import MAPS_DIR
+from bot.timeutil import get_zoneinfo, parse_duration_to_minutes
+
+if TYPE_CHECKING:
+    from bot.main import EliteBot
+
+logger = logging.getLogger(__name__)
+
+
+def _has_admin_access(interaction: discord.Interaction, bot: "EliteBot") -> bool:
+    member = interaction.user
+    if not isinstance(member, discord.Member):
+        return False
+    if member.guild_permissions.manage_guild:
+        return True
+    admin_role_id = bot.storage.data["config"]["admin_role_id"]
+    return admin_role_id is not None and any(role.id == admin_role_id for role in member.roles)
+
+
+class AdminConfigGroup(app_commands.Group):
+    def __init__(self, bot: "EliteBot") -> None:
+        super().__init__(
+            name="elite-config",
+            description="Admin configuration for the Elite boss tracker",
+            default_permissions=discord.Permissions(manage_guild=True),
+            guild_only=True,
+        )
+        self.bot = bot
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if _has_admin_access(interaction, self.bot):
+            return True
+        await interaction.response.send_message(strings.NO_PERMISSION, ephemeral=True)
+        return False
+
+    @app_commands.command(name="cooldown", description="Set the respawn cooldown for a zone")
+    @app_commands.describe(zone="Zone to update", duree="Cooldown duration, e.g. '4h' or '5h30'")
+    @app_commands.autocomplete(zone=zone_autocomplete)
+    async def cooldown(self, interaction: discord.Interaction, zone: str, duree: str) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            if zone not in storage.data["zones"]:
+                await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+                return
+            try:
+                minutes = parse_duration_to_minutes(duree)
+            except ValueError:
+                await interaction.response.send_message(
+                    strings.config_invalid_duration(duree), ephemeral=True
+                )
+                return
+            storage.data["zones"][zone]["cooldown_minutes"] = minutes
+            display_name = storage.data["zones"][zone]["display_name"]
+            await storage.save()
+
+        await interaction.response.send_message(
+            strings.config_cooldown_updated(display_name, minutes), ephemeral=True
+        )
+        await self.bot.perpetual.force_update(self.bot, time.time())
+
+    @app_commands.command(
+        name="channel", description="Set the channel for the perpetual status message"
+    )
+    @app_commands.describe(canal="Channel to post/update the status message in")
+    async def channel(self, interaction: discord.Interaction, canal: discord.TextChannel) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            storage.data["config"]["channel_id"] = canal.id
+            storage.data["config"]["perpetual_message_id"] = None
+            await storage.save()
+
+        await interaction.response.send_message(
+            strings.config_channel_updated(canal.mention), ephemeral=True
+        )
+        await self.bot.perpetual.force_update(self.bot, time.time())
+
+    @app_commands.command(
+        name="alert-role", description="Set (or clear) the role pinged in alerts"
+    )
+    @app_commands.describe(role="Role to mention in alerts; omit to clear (no ping)")
+    async def alert_role(
+        self, interaction: discord.Interaction, role: discord.Role | None = None
+    ) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            storage.data["config"]["alert_role_id"] = role.id if role else None
+            await storage.save()
+
+        if role is not None:
+            await interaction.response.send_message(
+                strings.config_alert_role_updated(role.mention), ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                strings.config_alert_role_cleared(), ephemeral=True
+            )
+
+    @app_commands.command(
+        name="admin-role", description="Set (or clear) the role allowed to use /elite-config"
+    )
+    @app_commands.describe(role="Role allowed to manage the tracker; omit to clear")
+    async def admin_role(
+        self, interaction: discord.Interaction, role: discord.Role | None = None
+    ) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            storage.data["config"]["admin_role_id"] = role.id if role else None
+            await storage.save()
+
+        if role is not None:
+            await interaction.response.send_message(
+                strings.config_admin_role_updated(role.mention), ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                strings.config_admin_role_cleared(), ephemeral=True
+            )
+
+    @app_commands.command(
+        name="alert-offset", description="Set the pre-alert delay before a window opens"
+    )
+    @app_commands.describe(minutes="Minutes before the window opens to send a pre-alert")
+    async def alert_offset(
+        self, interaction: discord.Interaction, minutes: app_commands.Range[int, 1, 180]
+    ) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            storage.data["config"]["alert_offset_minutes"] = minutes
+            await storage.save()
+
+        await interaction.response.send_message(
+            strings.config_alert_offset_updated(minutes), ephemeral=True
+        )
+
+    @app_commands.command(
+        name="timezone", description="Set the timezone used to interpret manual kill times"
+    )
+    @app_commands.describe(tz="IANA timezone name, e.g. Europe/Paris")
+    async def timezone(self, interaction: discord.Interaction, tz: str) -> None:
+        try:
+            get_zoneinfo(tz)
+        except ZoneInfoNotFoundError:
+            await interaction.response.send_message(
+                strings.config_timezone_invalid(tz), ephemeral=True
+            )
+            return
+
+        storage = self.bot.storage
+        async with storage.lock:
+            storage.data["config"]["timezone"] = tz
+            await storage.save()
+
+        await interaction.response.send_message(strings.config_timezone_updated(tz), ephemeral=True)
+
+    @app_commands.command(name="map", description="Upload/replace the map image for a zone")
+    @app_commands.describe(
+        zone="Zone to update the map for",
+        image="PNG or JPG map image with spawn points marked",
+    )
+    @app_commands.autocomplete(zone=zone_autocomplete)
+    async def set_map(
+        self, interaction: discord.Interaction, zone: str, image: discord.Attachment
+    ) -> None:
+        storage = self.bot.storage
+        if zone not in storage.data["zones"]:
+            await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+            return
+
+        content_type = (image.content_type or "").lower()
+        if not (content_type.startswith("image/png") or content_type.startswith("image/jpeg")):
+            await interaction.response.send_message(strings.config_map_invalid_type(), ephemeral=True)
+            return
+
+        MAPS_DIR.mkdir(parents=True, exist_ok=True)
+        await image.save(MAPS_DIR / f"{zone}.png")
+
+        display_name = storage.data["zones"][zone]["display_name"]
+        await interaction.response.send_message(strings.config_map_updated(display_name), ephemeral=True)
+
+    @app_commands.command(name="zone-add", description="Add a new zone to track")
+    @app_commands.describe(
+        nom="Display name for the new zone", cooldown="Cooldown duration, e.g. '4h' or '5h30'"
+    )
+    async def zone_add(self, interaction: discord.Interaction, nom: str, cooldown: str) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            try:
+                minutes = parse_duration_to_minutes(cooldown)
+            except ValueError:
+                await interaction.response.send_message(
+                    strings.config_invalid_duration(cooldown), ephemeral=True
+                )
+                return
+
+            key = domain.slugify(nom)
+            if key in storage.data["zones"]:
+                existing_name = storage.data["zones"][key]["display_name"]
+                await interaction.response.send_message(
+                    strings.config_zone_already_exists(existing_name), ephemeral=True
+                )
+                return
+
+            domain.add_zone(storage.data, key, nom, minutes)
+            await storage.save()
+
+        await interaction.response.send_message(
+            strings.config_zone_added(nom, minutes), ephemeral=True
+        )
+        await self.bot.perpetual.force_update(self.bot, time.time())
+
+    @app_commands.command(name="zone-remove", description="Remove a tracked zone and its history")
+    @app_commands.describe(zone="Zone to remove")
+    @app_commands.autocomplete(zone=zone_autocomplete)
+    async def zone_remove(self, interaction: discord.Interaction, zone: str) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            if zone not in storage.data["zones"]:
+                await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+                return
+
+            display_name = storage.data["zones"][zone]["display_name"]
+            domain.remove_zone(storage.data, zone)
+            await storage.save()
+
+        map_path = MAPS_DIR / f"{zone}.png"
+        if map_path.exists():
+            map_path.unlink()
+
+        await interaction.response.send_message(
+            strings.config_zone_removed(display_name), ephemeral=True
+        )
+        await self.bot.perpetual.force_update(self.bot, time.time())
+
+
+async def setup(bot: "EliteBot") -> None:
+    bot.tree.add_command(AdminConfigGroup(bot))

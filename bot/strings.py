@@ -79,10 +79,6 @@ def start_alert_description(window_start_ts: int, window_end_ts: int) -> str:
     )
 
 
-def alert_content(role_mention: str | None) -> str | None:
-    return role_mention if role_mention else None
-
-
 # ---------------------------------------------------------------------------
 # /elite-killed
 # ---------------------------------------------------------------------------
@@ -161,8 +157,8 @@ def stats_no_data(display_name: str) -> str:
     return f"Not enough kill history for **{display_name}** yet to compute intervals."
 
 
-def stats_interval_line(index: int, hours: float, minutes: int) -> str:
-    return f"{index}. {hours:.0f}h{minutes:02d}m"
+def stats_interval_line(index: int, hours: int, minutes: int) -> str:
+    return f"{index}. {hours}h{minutes:02d}m"
 
 
 def stats_average_line(configured_cooldown_minutes: int, average_minutes: float) -> str:
@@ -223,10 +219,6 @@ def config_alert_offset_updated(minutes: int) -> str:
     return f"Pre-alert offset set to {minutes} minutes before each window opens."
 
 
-def config_alert_offset_invalid() -> str:
-    return "Offset must be a positive number of minutes."
-
-
 def config_timezone_updated(tz: str) -> str:
     return f"Timezone set to `{tz}`."
 
@@ -255,6 +247,14 @@ def config_zone_already_exists(display_name: str) -> str:
 
 def config_zone_removed(display_name: str) -> str:
     return f"Zone **{display_name}** and its history have been removed."
+
+
+def config_admin_role_updated(role_mention: str) -> str:
+    return f"Admin role set to {role_mention} — members with this role can now use `/elite-config`."
+
+
+def config_admin_role_cleared() -> str:
+    return "Admin role cleared — only members with **Manage Server** can now use `/elite-config`."
 
 
 # ---------------------------------------------------------------------------
