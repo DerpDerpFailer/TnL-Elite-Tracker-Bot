@@ -258,6 +258,43 @@ def config_admin_role_cleared() -> str:
     return "Admin role cleared — only members with **Manage Server** can now use `/elite-config`."
 
 
+CONFIG_SHOW_TITLE = "Elite Tracker Configuration"
+CONFIG_SHOW_GENERAL_FIELD = "General"
+CONFIG_SHOW_ZONES_FIELD = "Zones"
+CONFIG_SHOW_NO_ZONES = "No zones configured."
+
+
+def config_show_channel_line(channel_mention: str | None) -> str:
+    return f"**Channel:** {channel_mention}" if channel_mention else "**Channel:** not set"
+
+
+def config_show_alert_role_line(role_mention: str | None) -> str:
+    return f"**Alert role:** {role_mention}" if role_mention else "**Alert role:** none (no ping)"
+
+
+def config_show_admin_role_line(role_mention: str | None) -> str:
+    return (
+        f"**Admin role:** {role_mention}"
+        if role_mention
+        else "**Admin role:** none (Manage Server only)"
+    )
+
+
+def config_show_alert_offset_line(minutes: int) -> str:
+    return f"**Pre-alert offset:** {minutes} minutes"
+
+
+def config_show_timezone_line(tz: str) -> str:
+    return f"**Timezone:** `{tz}`"
+
+
+def config_show_zone_line(display_name: str, cooldown_minutes: int, has_map: bool) -> str:
+    hours = cooldown_minutes // 60
+    minutes = cooldown_minutes % 60
+    map_marker = " 🗺️" if has_map else ""
+    return f"**{display_name}** — {hours}h{minutes:02d}m{map_marker}"
+
+
 # ---------------------------------------------------------------------------
 # Startup / operational log messages (not user-facing in Discord, but kept
 # here too so all copy lives in one place)

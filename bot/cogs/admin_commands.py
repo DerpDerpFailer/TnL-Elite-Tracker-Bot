@@ -252,6 +252,43 @@ class AdminConfigGroup(app_commands.Group):
         )
         await self.bot.perpetual.force_update(self.bot, time.time())
 
+    @app_commands.command(name="show", description="Show the current tracker configuration")
+    async def show(self, interaction: discord.Interaction) -> None:
+        storage = self.bot.storage
+        config = storage.data["config"]
+
+        channel_mention = f"<#{config['channel_id']}>" if config["channel_id"] else None
+        alert_role_mention = f"<@&{config['alert_role_id']}>" if config["alert_role_id"] else None
+        admin_role_mention = f"<@&{config['admin_role_id']}>" if config["admin_role_id"] else None
+
+        general_lines = [
+            strings.config_show_channel_line(channel_mention),
+            strings.config_show_alert_role_line(alert_role_mention),
+            strings.config_show_admin_role_line(admin_role_mention),
+            strings.config_show_alert_offset_line(config["alert_offset_minutes"]),
+            strings.config_show_timezone_line(config["timezone"]),
+        ]
+
+        zone_lines = [
+            strings.config_show_zone_line(
+                zone["display_name"],
+                zone["cooldown_minutes"],
+                (MAPS_DIR / f"{key}.png").exists(),
+            )
+            for key, zone in storage.data["zones"].items()
+        ]
+
+        embed = discord.Embed(title=strings.CONFIG_SHOW_TITLE, color=discord.Color.blurple())
+        embed.add_field(
+            name=strings.CONFIG_SHOW_GENERAL_FIELD, value="\n".join(general_lines), inline=False
+        )
+        embed.add_field(
+            name=strings.CONFIG_SHOW_ZONES_FIELD,
+            value="\n".join(zone_lines) if zone_lines else strings.CONFIG_SHOW_NO_ZONES,
+            inline=False,
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
 async def setup(bot: "EliteBot") -> None:
     bot.tree.add_command(AdminConfigGroup(bot))

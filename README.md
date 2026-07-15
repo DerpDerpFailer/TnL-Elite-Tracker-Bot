@@ -206,6 +206,7 @@ finer-grained control.
 | `/elite-config map zone image` | Upload/replace a zone's map (PNG/JPG), attached to future alerts. |
 | `/elite-config zone-add nom cooldown` | Add a new zone. |
 | `/elite-config zone-remove zone` | Remove a zone and its history. |
+| `/elite-config show` | Show the full current configuration (channel, roles, offset, timezone, zones and their cooldowns) in one embed. |
 
 Examples:
 
@@ -219,6 +220,7 @@ Examples:
 /elite-config map zone:Nix image:nix-map.png
 /elite-config zone-add nom:Aldheim cooldown:5h
 /elite-config zone-remove zone:Aldheim
+/elite-config show
 ```
 
 ## Data file layout
