@@ -206,6 +206,8 @@ finer-grained control.
 | `/elite-config map zone image` | Upload/replace a zone's map (PNG/JPG), attached to future alerts. |
 | `/elite-config zone-add nom cooldown` | Add a new zone. |
 | `/elite-config zone-remove zone` | Remove a zone and its history. |
+| `/elite-config zone-reset zone` | Clear a zone's last kill, current window and history — keeps its cooldown and map. Useful to wipe test data or fix a bad entry beyond what `/elite-undo` can revert (it only undoes one step). |
+| `/elite-config repost` | Recreate the perpetual status message if it was deleted by accident, or force an immediate refresh. |
 | `/elite-config show` | Show the full current configuration (channel, roles, offset, timezone, zones and their cooldowns) in one embed. |
 
 Examples:
@@ -220,6 +222,8 @@ Examples:
 /elite-config map zone:Nix image:nix-map.png
 /elite-config zone-add nom:Aldheim cooldown:5h
 /elite-config zone-remove zone:Aldheim
+/elite-config zone-reset zone:Laslan
+/elite-config repost
 /elite-config show
 ```
 

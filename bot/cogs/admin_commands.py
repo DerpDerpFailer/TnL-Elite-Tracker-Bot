@@ -252,6 +252,44 @@ class AdminConfigGroup(app_commands.Group):
         )
         await self.bot.perpetual.force_update(self.bot, time.time())
 
+    @app_commands.command(
+        name="zone-reset",
+        description="Clear a zone's last kill, current window and history (keeps cooldown and map)",
+    )
+    @app_commands.describe(zone="Zone to reset")
+    @app_commands.autocomplete(zone=zone_autocomplete)
+    async def zone_reset(self, interaction: discord.Interaction, zone: str) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            if zone not in storage.data["zones"]:
+                await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+                return
+
+            display_name = storage.data["zones"][zone]["display_name"]
+            domain.reset_zone(storage.data, zone)
+            await storage.save()
+
+        await interaction.response.send_message(
+            strings.config_zone_reset(display_name), ephemeral=True
+        )
+        await self.bot.perpetual.force_update(self.bot, time.time())
+
+    @app_commands.command(
+        name="repost",
+        description="Recreate the perpetual status message if it was deleted, or force a refresh",
+    )
+    async def repost(self, interaction: discord.Interaction) -> None:
+        if self.bot.storage.data["config"]["channel_id"] is None:
+            await interaction.response.send_message(
+                strings.config_repost_no_channel(), ephemeral=True
+            )
+            return
+
+        await interaction.response.send_message(
+            strings.config_repost_confirmation(), ephemeral=True
+        )
+        await self.bot.perpetual.force_update(self.bot, time.time())
+
     @app_commands.command(name="show", description="Show the current tracker configuration")
     async def show(self, interaction: discord.Interaction) -> None:
         storage = self.bot.storage

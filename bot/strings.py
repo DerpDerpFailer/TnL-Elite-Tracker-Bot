@@ -250,6 +250,21 @@ def config_zone_removed(display_name: str) -> str:
     return f"Zone **{display_name}** and its history have been removed."
 
 
+def config_zone_reset(display_name: str) -> str:
+    return (
+        f"Zone **{display_name}** has been reset — last kill, current window and history "
+        "cleared. Cooldown and map are unchanged."
+    )
+
+
+def config_repost_no_channel() -> str:
+    return "No channel is configured yet. Set one first with `/elite-config channel`."
+
+
+def config_repost_confirmation() -> str:
+    return "Refreshing the perpetual status message now — it will be recreated if it's missing."
+
+
 def config_admin_role_updated(role_mention: str) -> str:
     return f"Admin role set to {role_mention} — members with this role can now use `/elite-config`."
 

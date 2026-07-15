@@ -106,6 +106,15 @@ def remove_zone(data: RootData, zone_key: str) -> None:
     data["undo"].pop(zone_key, None)
 
 
+def reset_zone(data: RootData, zone_key: str) -> None:
+    """Clears last kill/window/history/undo for a zone, keeping its display
+    name and cooldown (and its map file, which lives outside the JSON)."""
+    zone = data["zones"][zone_key]
+    data["zones"][zone_key] = build_zone_state(zone["display_name"], zone["cooldown_minutes"])
+    data["history"][zone_key] = []
+    data["undo"].pop(zone_key, None)
+
+
 def kill_intervals_minutes(history: list[HistoryEntry], max_intervals: int = 10) -> list[float]:
     kills = sorted((h for h in history if h["type"] == "kill"), key=lambda h: h["timestamp"])
     diffs = [
