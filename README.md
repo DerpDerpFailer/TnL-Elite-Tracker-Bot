@@ -61,15 +61,26 @@ State is a single JSON file (`/data/elite.json`), written atomically with a
 Build the invite URL with the **`bot`** and **`applications.commands`**
 scopes and the minimal permission set the bot actually needs: view the
 channel, send messages, embed links (required for all the embeds), attach
-files (map images), and mention everyone/roles (required to ping the
-configured alert role, which is typically not a self-mentionable role).
+files (map images), mention everyone/roles (required to ping the configured
+alert role, which is typically not a self-mentionable role), and **read
+message history** — required for `fetch_message`, which the bot uses to find
+its own perpetual status message by ID and edit it (including right after a
+restart, to find a message posted before the bot came back up). Without it,
+the bot silently fails to edit the perpetual message and only logs a
+"missing permissions" warning.
 
-That permission set is the integer **`183296`**. Replace `YOUR_CLIENT_ID`
+That permission set is the integer **`248832`**. Replace `YOUR_CLIENT_ID`
 below with your application's Client ID:
 
 ```
-https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&scope=bot+applications.commands&permissions=183296
+https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&scope=bot+applications.commands&permissions=248832
 ```
+
+If the bot is already in your server with the old permission set, you don't
+need to kick and re-invite it: open the URL above and click **Authorize**
+again — Discord updates the existing bot role's permissions in place. You can
+also add it manually from **Server Settings → Roles** → the bot's
+auto-created role → enable **Read Message History**.
 
 Open that URL, pick your server, and authorize it.
 
