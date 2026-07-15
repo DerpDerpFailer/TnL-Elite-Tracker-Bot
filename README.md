@@ -39,7 +39,7 @@ State is a single JSON file (`/data/elite.json`), written atomically with a
 ## Discord Developer Portal setup
 
 1. Go to the [Discord Developer Portal](https://discord.com/developers/applications)
-   and click **New Application**. Name it (e.g. "TL Elite Tracker").
+   and click **New Application**. Name it (e.g. "TnL Elite Tracker").
 2. Open the **Bot** tab:
    - Click **Reset Token** / **Copy** to get your bot token — this is the
      `DISCORD_TOKEN` value. Keep it secret; it is never committed to this
