@@ -199,6 +199,7 @@ finer-grained control.
 |---|---|
 | `/elite-config cooldown zone duree` | Set a zone's cooldown, e.g. `4h`, `5h30`, `90m`. |
 | `/elite-config channel canal` | Set the channel for the perpetual status embed. |
+| `/elite-config alert-channel canal` | Set a separate channel for spawn alerts (pre-alert + window-open); omit to send alerts in the status channel instead. |
 | `/elite-config alert-role role` | Role pinged in alerts; omit to clear (no ping). |
 | `/elite-config admin-role role` | Role allowed to use `/elite-config`, in addition to Manage Server; omit to clear. |
 | `/elite-config alert-offset minutes` | Pre-alert delay before a window opens (default 15). |
@@ -215,6 +216,7 @@ Examples:
 ```
 /elite-config cooldown zone:Talandre duree:5h30
 /elite-config channel canal:#elite-timers
+/elite-config alert-channel canal:#elite-alerts
 /elite-config alert-role role:@Elite Hunters
 /elite-config admin-role role:@Boss Timer Admin
 /elite-config alert-offset minutes:10
@@ -247,9 +249,10 @@ Top-level JSON structure:
 
 ```jsonc
 {
-  "version": 1,
+  "version": 2,
   "config": {
     "channel_id": null,
+    "alert_channel_id": null,
     "alert_role_id": null,
     "admin_role_id": null,
     "alert_offset_minutes": 15,

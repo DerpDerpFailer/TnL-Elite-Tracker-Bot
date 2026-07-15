@@ -96,6 +96,30 @@ class AdminConfigGroup(app_commands.Group):
         await self.bot.perpetual.force_update(self.bot, time.time())
 
     @app_commands.command(
+        name="alert-channel",
+        description="Set (or clear) a separate channel for spawn alerts",
+    )
+    @app_commands.describe(
+        canal="Channel for pre-alert/spawn-open alerts; omit to use the status channel instead"
+    )
+    async def alert_channel(
+        self, interaction: discord.Interaction, canal: discord.TextChannel | None = None
+    ) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            storage.data["config"]["alert_channel_id"] = canal.id if canal else None
+            await storage.save()
+
+        if canal is not None:
+            await interaction.response.send_message(
+                strings.config_alert_channel_updated(canal.mention), ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                strings.config_alert_channel_cleared(), ephemeral=True
+            )
+
+    @app_commands.command(
         name="alert-role", description="Set (or clear) the role pinged in alerts"
     )
     @app_commands.describe(role="Role to mention in alerts; omit to clear (no ping)")
@@ -296,11 +320,15 @@ class AdminConfigGroup(app_commands.Group):
         config = storage.data["config"]
 
         channel_mention = f"<#{config['channel_id']}>" if config["channel_id"] else None
+        alert_channel_mention = (
+            f"<#{config['alert_channel_id']}>" if config["alert_channel_id"] else None
+        )
         alert_role_mention = f"<@&{config['alert_role_id']}>" if config["alert_role_id"] else None
         admin_role_mention = f"<@&{config['admin_role_id']}>" if config["admin_role_id"] else None
 
         general_lines = [
             strings.config_show_channel_line(channel_mention),
+            strings.config_show_alert_channel_line(alert_channel_mention),
             strings.config_show_alert_role_line(alert_role_mention),
             strings.config_show_admin_role_line(admin_role_mention),
             strings.config_show_alert_offset_line(config["alert_offset_minutes"]),

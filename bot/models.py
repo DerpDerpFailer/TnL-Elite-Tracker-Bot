@@ -13,6 +13,7 @@ from bot.constants import DEFAULT_ZONES, SCHEMA_VERSION
 
 class Config(TypedDict):
     channel_id: int | None
+    alert_channel_id: int | None
     alert_role_id: int | None
     alert_offset_minutes: int
     timezone: str
@@ -83,6 +84,7 @@ def build_seed_data() -> RootData:
         version=SCHEMA_VERSION,
         config=Config(
             channel_id=None,
+            alert_channel_id=None,
             alert_role_id=None,
             alert_offset_minutes=15,
             timezone="Europe/Paris",

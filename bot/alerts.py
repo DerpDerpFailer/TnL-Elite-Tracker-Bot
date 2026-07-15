@@ -47,7 +47,7 @@ class AlertManager:
     async def check_windows(self, bot: discord.Client) -> None:
         now = time.time()
         config = self.storage.data["config"]
-        channel_id = config["channel_id"]
+        channel_id = config["alert_channel_id"] or config["channel_id"]
         if channel_id is None:
             return
 

@@ -74,17 +74,20 @@ class Storage:
             return None
 
     def _migrate(self) -> None:
-        version = self.data.get("version")
-        if version == SCHEMA_VERSION:
-            return
-        # Placeholder for future migrations: bump SCHEMA_VERSION in
-        # bot/constants.py and add incremental transforms here as the game
-        # gets patched and the JSON structure needs to change shape.
-        logger.warning(
-            "Data file version %s does not match expected %s; using as-is",
-            version,
-            SCHEMA_VERSION,
-        )
+        version = self.data.get("version", 0)
+
+        if version < 2:
+            # v2 added a separate alert channel, falling back to the status
+            # channel when unset; older files simply lack the key.
+            self.data["config"].setdefault("alert_channel_id", None)
+            version = 2
+
+        if version != SCHEMA_VERSION:
+            logger.warning(
+                "Data file version %s does not match expected %s after migrations; using as-is",
+                version,
+                SCHEMA_VERSION,
+            )
         self.data["version"] = SCHEMA_VERSION
 
     async def save(self) -> None:

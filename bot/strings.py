@@ -208,6 +208,14 @@ def config_channel_updated(channel_mention: str) -> str:
     return f"Perpetual status message will now be posted/updated in {channel_mention}."
 
 
+def config_alert_channel_updated(channel_mention: str) -> str:
+    return f"Spawn alerts will now be posted in {channel_mention}."
+
+
+def config_alert_channel_cleared() -> str:
+    return "Alert channel cleared — spawn alerts will be posted in the status channel instead."
+
+
 def config_alert_role_updated(role_mention: str) -> str:
     return f"Alert role set to {role_mention}."
 
@@ -281,6 +289,14 @@ CONFIG_SHOW_NO_ZONES = "No zones configured."
 
 def config_show_channel_line(channel_mention: str | None) -> str:
     return f"**Channel:** {channel_mention}" if channel_mention else "**Channel:** not set"
+
+
+def config_show_alert_channel_line(channel_mention: str | None) -> str:
+    return (
+        f"**Alert channel:** {channel_mention}"
+        if channel_mention
+        else "**Alert channel:** same as status channel"
+    )
 
 
 def config_show_alert_role_line(role_mention: str | None) -> str:
