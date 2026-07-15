@@ -1,0 +1,12 @@
+services:
+  elite-tracker-bot:
+    build: .
+    restart: unless-stopped
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      GUILD_ID: ${GUILD_ID}
+    volumes:
+      - elite-data:/data
+
+volumes:
+  elite-data:

@@ -1,0 +1,263 @@
+# TL Elite Tracker Bot
+
+A single-guild Discord bot that tracks Elite PvP boss respawn timers for
+**Throne and Liberty**. Members log kills and no-shows, the bot computes the
+next 7-minute spawn window per zone, keeps a live status embed up to date, and
+posts pre-spawn / spawn-open alerts with the zone's map attached.
+
+State is a single JSON file (`/data/elite.json`), written atomically with a
+`.bak` copy kept on every write — there is no database.
+
+## Contents
+
+- [How it works](#how-it-works)
+- [Discord Developer Portal setup](#discord-developer-portal-setup)
+- [Invite URL](#invite-url)
+- [Local development](#local-development)
+- [Deploying with Portainer](#deploying-with-portainer)
+- [Updating the bot](#updating-the-bot)
+- [Command reference](#command-reference)
+- [Data file layout](#data-file-layout)
+
+## How it works
+
+- Each zone has a configurable cooldown. After a kill is logged, the boss is
+  expected to respawn somewhere in a **7-minute window** starting `cooldown`
+  after the kill, at one of several possible spawn points in the zone (the
+  bot does not track individual spawn points, only the region-level window).
+- A single embed message (the "perpetual message") in a configured channel
+  shows live status for every zone, using Discord's native `<t:...>`
+  timestamps so each member sees times in their own timezone.
+- A background task checks every 30 seconds whether a pre-alert or
+  window-open alert is due for any zone, and sends it (with the zone's map
+  image attached, if one was uploaded) exactly once per window.
+- All game-side values (cooldowns, zone list, map images, channel, alert role,
+  timezone, admin role) are configured through `/elite-config` — the game is
+  patched weekly, so nothing here should require touching code or redeploying
+  for a balance change.
+
+## Discord Developer Portal setup
+
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications)
+   and click **New Application**. Name it (e.g. "TL Elite Tracker").
+2. Open the **Bot** tab:
+   - Click **Reset Token** / **Copy** to get your bot token — this is the
+     `DISCORD_TOKEN` value. Keep it secret; it is never committed to this
+     repository.
+   - **Privileged Gateway Intents**: leave all three toggles (Presence,
+     Server Members, Message Content) **off**. This bot only uses slash
+     commands and never reads message content, so no privileged intent is
+     required.
+3. Open the **OAuth2 → General** tab if you need the **Application (Client)
+   ID** for the invite URL below.
+4. You will also need your **Guild ID** (the Discord server's ID): enable
+   Developer Mode in Discord (User Settings → Advanced), then right-click
+   your server icon → **Copy Server ID**. This is the `GUILD_ID` value —
+   commands are synced directly to this guild for instant availability
+   (no waiting on global command propagation).
+
+## Invite URL
+
+Build the invite URL with the **`bot`** and **`applications.commands`**
+scopes and the minimal permission set the bot actually needs: view the
+channel, send messages, embed links (required for all the embeds), attach
+files (map images), and mention everyone/roles (required to ping the
+configured alert role, which is typically not a self-mentionable role).
+
+That permission set is the integer **`183296`**. Replace `YOUR_CLIENT_ID`
+below with your application's Client ID:
+
+```
+https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&scope=bot+applications.commands&permissions=183296
+```
+
+Open that URL, pick your server, and authorize it.
+
+## Local development
+
+Only useful for testing outside of Portainer. Requires Python 3.12+.
+
+```bash
+cp .env.example .env
+# edit .env and fill in DISCORD_TOKEN and GUILD_ID
+
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+mkdir -p data  # local stand-in for the /data volume
+python -m bot.main
+```
+
+By default the bot reads/writes `/data/elite.json`, which only exists inside
+the container. For a genuinely local run outside Docker, either create
+`/data` locally (requires permissions) or run via `docker compose` as
+described below — that's the supported path for anything beyond a quick
+syntax check.
+
+## Deploying with Portainer
+
+The bot is deployed as a **Portainer Stack of type "Repository"**, pointed at
+this GitHub repository, so redeploys are a matter of pulling the latest
+commit rather than pushing images by hand.
+
+### 1. Create a GitHub Personal Access Token (read-only)
+
+Since this repository is private, Portainer needs a token to clone it:
+
+1. On GitHub, go to **Settings → Developer settings → Personal access
+   tokens → Fine-grained tokens → Generate new token**.
+2. **Repository access**: select "Only select repositories" and choose
+   `tl-elite-tracker-bot`.
+3. **Permissions**: under "Repository permissions", set **Contents** to
+   **Read-only**. Nothing else is required.
+4. Generate the token and copy it immediately (it won't be shown again).
+
+### 2. Create the Stack in Portainer
+
+1. In Portainer, go to **Stacks → Add stack**.
+2. **Build method**: select **Repository**.
+3. **Repository URL**: `https://github.com/<your-account>/tl-elite-tracker-bot`
+4. **Repository reference**: `refs/heads/main`
+5. **Compose path**: `docker-compose.yml`
+6. **Authentication**: enable it, and provide:
+   - **Username**: your GitHub username (or any placeholder — fine-grained
+     tokens authenticate by token, but GitHub still expects a username field)
+   - **Personal Access Token**: the token created above
+7. **Environment variables**: add
+   - `DISCORD_TOKEN` = your bot token
+   - `GUILD_ID` = your guild ID
+
+   These are stack-level secrets in Portainer, **not** committed anywhere in
+   this repo — `docker-compose.yml` only references `${DISCORD_TOKEN}` and
+   `${GUILD_ID}`.
+8. (Optional, recommended) Enable **GitOps updates** and set a **webhook** or
+   polling interval so the stack automatically redeploys whenever `main` is
+   pushed. If you skip this, use the manual "Pull and redeploy" button
+   described below.
+9. Click **Deploy the stack**.
+
+Portainer will clone the repo, build the image from the `Dockerfile`, and
+start the `elite-tracker-bot` service with the named volume `elite-data`
+mounted at `/data` (a named volume is used deliberately — a relative bind
+mount doesn't work reliably with Portainer's git-based stacks, since the
+repo is checked out into an ephemeral location).
+
+## Updating the bot
+
+- **Manual**: after pushing to `main`, open the stack in Portainer and click
+  **Pull and redeploy** — this re-clones the repo at the latest commit,
+  rebuilds the image, and restarts the container. Data in `/data` is
+  untouched since it lives in the named volume, not the image.
+- **Automatic (optional)**: if you enabled GitOps/webhook updates when
+  creating the stack, Portainer redeploys automatically on every push to
+  `main` — no manual step needed.
+
+## Command reference
+
+### Member commands
+
+| Command | Description |
+|---|---|
+| `/elite-killed zone heure` | Report a kill. `zone` autocompletes; `heure` is optional (`HH:MM` for today, or `DD/MM HH:MM`), defaults to now. |
+| `/elite-noshow zone` | Report that the boss did not spawn in the expected window; pushes the timer back by one full cooldown. |
+| `/elite-undo zone` | Undo the last kill/no-show entry for that zone. |
+| `/elite-status` | Ephemeral table of every zone: last kill, next window, who reported it. |
+| `/elite-stats zone` | Up to the last 10 observed kill-to-kill intervals and their average, flagged if it drifts >15 min from the configured cooldown. |
+
+Examples:
+
+```
+/elite-killed zone:Laslan
+/elite-killed zone:Nix heure:21:45
+/elite-killed zone:Talandre heure:14/07 09:10
+/elite-noshow zone:Stonegard
+/elite-undo zone:Syleus
+/elite-status
+/elite-stats zone:Nix
+```
+
+### Admin commands (`/elite-config ...`)
+
+Requires the **Manage Server** permission, or the role configured via
+`admin-role` below. Discord server admins can additionally grant/restrict
+individual subcommands per-role from **Server Settings → Integrations** for
+finer-grained control.
+
+| Subcommand | Description |
+|---|---|
+| `/elite-config cooldown zone duree` | Set a zone's cooldown, e.g. `4h`, `5h30`, `90m`. |
+| `/elite-config channel canal` | Set the channel for the perpetual status embed. |
+| `/elite-config alert-role role` | Role pinged in alerts; omit to clear (no ping). |
+| `/elite-config admin-role role` | Role allowed to use `/elite-config`, in addition to Manage Server; omit to clear. |
+| `/elite-config alert-offset minutes` | Pre-alert delay before a window opens (default 15). |
+| `/elite-config timezone tz` | IANA timezone used to interpret manual kill times, e.g. `Europe/Paris`. |
+| `/elite-config map zone image` | Upload/replace a zone's map (PNG/JPG), attached to future alerts. |
+| `/elite-config zone-add nom cooldown` | Add a new zone. |
+| `/elite-config zone-remove zone` | Remove a zone and its history. |
+
+Examples:
+
+```
+/elite-config cooldown zone:Talandre duree:5h30
+/elite-config channel canal:#elite-timers
+/elite-config alert-role role:@Elite Hunters
+/elite-config admin-role role:@Boss Timer Admin
+/elite-config alert-offset minutes:10
+/elite-config timezone tz:Europe/Paris
+/elite-config map zone:Nix image:nix-map.png
+/elite-config zone-add nom:Aldheim cooldown:5h
+/elite-config zone-remove zone:Aldheim
+```
+
+## Data file layout
+
+Seeded automatically on first boot if `/data/elite.json` doesn't exist, with
+the five zones the game currently ships with:
+
+| Zone | Default cooldown |
+|---|---|
+| Laslan | 4h |
+| Stonegard | 4h |
+| Syleus | 4h |
+| Talandre | 6h |
+| Nix | 6h |
+
+These are community estimates and are expected to change after patches —
+update them with `/elite-config cooldown`, no redeploy needed.
+
+Top-level JSON structure:
+
+```jsonc
+{
+  "version": 1,
+  "config": {
+    "channel_id": null,
+    "alert_role_id": null,
+    "admin_role_id": null,
+    "alert_offset_minutes": 15,
+    "timezone": "Europe/Paris",
+    "perpetual_message_id": null
+  },
+  "zones": {
+    "laslan": {
+      "display_name": "Laslan",
+      "cooldown_minutes": 240,
+      "last_kill_at": null,
+      "last_kill_by": null,
+      "window_start": null,
+      "window_end": null,
+      "pre_alert_sent": false,
+      "start_alert_sent": false
+    }
+    // ...
+  },
+  "history": {
+    "laslan": []
+    // up to 50 most recent kill/no-show events per zone
+  }
+}
+```
+
+Map images live alongside it at `/data/maps/<zone>.png`, also persisted in
+the named Docker volume.
