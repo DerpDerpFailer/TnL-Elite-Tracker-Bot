@@ -44,7 +44,8 @@ def build_status_embed(storage: Storage, now: float) -> discord.Embed:
                 int(zone["window_end"]),
             )
         embed.add_field(name="​", value=line, inline=False)
-    embed.set_footer(text=strings.status_embed_footer(int(now)))
+    embed.add_field(name="​", value=strings.status_embed_updated_line(int(now)), inline=False)
+    embed.set_footer(text=strings.STATUS_EMBED_FOOTER)
     return embed
 
 

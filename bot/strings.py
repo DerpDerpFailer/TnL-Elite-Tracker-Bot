@@ -23,10 +23,11 @@ PHASE_EMOJI: dict[ZonePhase, str] = {
 
 STATUS_EMBED_TITLE = "Elite Boss Timers"
 STATUS_EMBED_DESCRIPTION = "Live respawn windows for every tracked Elite PvP zone."
+STATUS_EMBED_FOOTER = "Use /elite-killed to report a kill"
 
 
-def status_embed_footer(updated_ts: int) -> str:
-    return f"Last updated <t:{updated_ts}:R> | Use /elite-killed to report a kill"
+def status_embed_updated_line(updated_ts: int) -> str:
+    return f"Last updated <t:{updated_ts}:R>"
 
 
 def zone_line_no_data(emoji: str, display_name: str) -> str:
