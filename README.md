@@ -1,4 +1,4 @@
-# TL Elite Tracker Bot
+# TnL Elite Tracker Bot
 
 A single-guild Discord bot that tracks Elite PvP boss respawn timers for
 **Throne and Liberty**. Members log kills and no-shows, the bot computes the
