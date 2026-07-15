@@ -108,7 +108,7 @@ Since this repository is private, Portainer needs a token to clone it:
 1. On GitHub, go to **Settings → Developer settings → Personal access
    tokens → Fine-grained tokens → Generate new token**.
 2. **Repository access**: select "Only select repositories" and choose
-   `tl-elite-tracker-bot`.
+   `TnL-Elite-Tracker-Bot`.
 3. **Permissions**: under "Repository permissions", set **Contents** to
    **Read-only**. Nothing else is required.
 4. Generate the token and copy it immediately (it won't be shown again).
@@ -117,7 +117,7 @@ Since this repository is private, Portainer needs a token to clone it:
 
 1. In Portainer, go to **Stacks → Add stack**.
 2. **Build method**: select **Repository**.
-3. **Repository URL**: `https://github.com/<your-account>/tl-elite-tracker-bot`
+3. **Repository URL**: `https://github.com/<your-account>/TnL-Elite-Tracker-Bot`
 4. **Repository reference**: `refs/heads/main`
 5. **Compose path**: `docker-compose.yml`
 6. **Authentication**: enable it, and provide:
