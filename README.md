@@ -36,13 +36,13 @@ State is a single JSON file (`/data/elite.json`), written atomically with a
 - The pre-alert gives every sub-zone its own row with two buttons:
   **"Scouting `<sub-zone>`"** toggles that member in/out of the sub-zone's
   scout list (the embed updates live for everyone, plus that sub-zone's own
-  map image sent ephemerally if one was uploaded), and **"Elite Found"**
-  announces the boss was located there — it disables Scouting/Elite Found
-  for the whole zone (across every message it spans) since there's no more
-  need to keep scouting once it's found, marks the shared embed's title
-  "... Scouting - Done" with a bold "Elite found at `<sub-zone>`" note, and
-  posts a new pinged announcement embed with that sub-zone's map attached if
-  one was uploaded.
+  map image sent ephemerally if one was uploaded), and a plain 📍 **"Elite
+  Found"** button (icon only) announces the boss was located there — it
+  disables Scouting/📍 for the whole zone (across every message it spans)
+  since there's no more need to keep scouting once it's found, marks the
+  shared embed's title "... Scouting - Done" with a bold "Elite found at
+  `<sub-zone>`" note, and posts a new pinged announcement embed with that
+  sub-zone's map attached if one was uploaded.
 - Once the spawn time is reached, that same scouting message is edited
   in-place (title → "... Scouting — Spawn Due", no new message, no ping) to
   add a third button per row: a plain 💀 **"Elite killed"** button (icon

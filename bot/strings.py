@@ -112,7 +112,7 @@ def scout_cancelled(subzone_display_name: str) -> str:
     return f"You're no longer scouting **{subzone_display_name}**."
 
 
-FOUND_BUTTON_LABEL = "Elite Found"
+FOUND_BUTTON_EMOJI = "\U0001f4cd"  # 📍
 
 
 def scouting_done_title(zone_display_name: str) -> str:

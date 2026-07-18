@@ -160,7 +160,7 @@ class ScoutingView(discord.ui.View):
             self.add_item(scout_button)
 
             found_button: discord.ui.Button = discord.ui.Button(
-                label=strings.FOUND_BUTTON_LABEL,
+                emoji=strings.FOUND_BUTTON_EMOJI,
                 style=discord.ButtonStyle.success,
                 custom_id=found_custom_id_for(zone_key, subzone_key),
                 row=row,
