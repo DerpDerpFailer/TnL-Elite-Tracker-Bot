@@ -6,18 +6,36 @@ holding `storage.lock` around a mutate-then-`storage.save()` sequence.
 """
 from __future__ import annotations
 
-import re
 from copy import deepcopy
 
 from bot.constants import MAX_HISTORY_PER_ZONE, SPAWN_WINDOW_MINUTES
-from bot.models import HistoryEntry, RootData, ZoneState, build_zone_state
+from bot.models import (
+    HistoryEntry,
+    RootData,
+    ZoneState,
+    build_subzone_state,
+    build_zone_state,
+)
+from bot.slugs import slugify
+
+__all__ = [
+    "slugify",
+    "record_kill",
+    "record_noshow",
+    "undo_last",
+    "add_zone",
+    "remove_zone",
+    "reset_zone",
+    "add_subzone",
+    "remove_subzone",
+    "toggle_scout",
+    "kill_intervals_minutes",
+]
 
 
-def slugify(name: str) -> str:
-    slug = name.strip().lower()
-    slug = re.sub(r"\s+", "-", slug)
-    slug = re.sub(r"[^a-z0-9-]", "", slug)
-    return slug
+def _clear_scouts(zone: ZoneState) -> None:
+    for subzone in zone["subzones"].values():
+        subzone["scouts"] = []
 
 
 def _snapshot_for_undo(data: RootData, zone_key: str) -> None:
@@ -49,6 +67,7 @@ def record_kill(
     zone["window_end"] = window_end
     zone["pre_alert_sent"] = False
     zone["start_alert_sent"] = False
+    _clear_scouts(zone)
 
     _append_history(
         data,
@@ -76,6 +95,7 @@ def record_noshow(
     zone["window_end"] = new_window_end
     zone["pre_alert_sent"] = False
     zone["start_alert_sent"] = False
+    _clear_scouts(zone)
 
     _append_history(
         data,
@@ -108,11 +128,34 @@ def remove_zone(data: RootData, zone_key: str) -> None:
 
 def reset_zone(data: RootData, zone_key: str) -> None:
     """Clears last kill/window/history/undo for a zone, keeping its display
-    name and cooldown (and its map file, which lives outside the JSON)."""
+    name, cooldown and configured sub-zones (and its map files, which live
+    outside the JSON) — only each sub-zone's current scout list is cleared."""
     zone = data["zones"][zone_key]
-    data["zones"][zone_key] = build_zone_state(zone["display_name"], zone["cooldown_minutes"])
+    new_zone = build_zone_state(zone["display_name"], zone["cooldown_minutes"])
+    new_zone["subzones"] = zone["subzones"]
+    _clear_scouts(new_zone)
+    data["zones"][zone_key] = new_zone
     data["history"][zone_key] = []
     data["undo"].pop(zone_key, None)
+
+
+def add_subzone(data: RootData, zone_key: str, subzone_key: str, display_name: str) -> None:
+    data["zones"][zone_key]["subzones"][subzone_key] = build_subzone_state(display_name)
+
+
+def remove_subzone(data: RootData, zone_key: str, subzone_key: str) -> None:
+    data["zones"][zone_key]["subzones"].pop(subzone_key, None)
+
+
+def toggle_scout(data: RootData, zone_key: str, subzone_key: str, user_id: int) -> bool:
+    """Adds or removes user_id from the sub-zone's scout list. Returns True if
+    the user is now scouting it, False if they were removed."""
+    scouts = data["zones"][zone_key]["subzones"][subzone_key]["scouts"]
+    if user_id in scouts:
+        scouts.remove(user_id)
+        return False
+    scouts.append(user_id)
+    return True
 
 
 def kill_intervals_minutes(history: list[HistoryEntry], max_intervals: int = 10) -> list[float]:

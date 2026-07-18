@@ -20,8 +20,9 @@ import tempfile
 from pathlib import Path
 
 from bot import strings
-from bot.constants import BACKUP_FILE, DATA_FILE, MAPS_DIR, SCHEMA_VERSION
-from bot.models import RootData, build_seed_data
+from bot.constants import BACKUP_FILE, DATA_FILE, DEFAULT_SUBZONES, MAPS_DIR, SCHEMA_VERSION
+from bot.models import RootData, build_seed_data, build_subzone_state
+from bot.slugs import slugify
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,19 @@ class Storage:
             # channel when unset; older files simply lack the key.
             self.data["config"].setdefault("alert_channel_id", None)
             version = 2
+
+        if version < 3:
+            # v3 added named sub-zones (scouting targets within a region).
+            # Backfill the known sub-zone list for zones the guild already
+            # tracks under a default key; any other (custom, admin-added)
+            # zone just gets an empty sub-zone dict to fill in later via
+            # /elite-config subzone-add.
+            for zone_key, zone in self.data["zones"].items():
+                subzones = zone.setdefault("subzones", {})
+                for subzone_name in DEFAULT_SUBZONES.get(zone_key, []):
+                    subzone_key = slugify(subzone_name)
+                    subzones.setdefault(subzone_key, build_subzone_state(subzone_name))
+            version = 3
 
         if version != SCHEMA_VERSION:
             logger.warning(

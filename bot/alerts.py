@@ -14,6 +14,7 @@ from bot import strings
 from bot.constants import MAPS_DIR
 from bot.models import ZoneState
 from bot.perpetual_message import PerpetualMessageManager
+from bot.scouting import ScoutingView, build_scouting_embed
 from bot.storage import Storage
 from bot.views import KillButtonView
 
@@ -99,26 +100,20 @@ class AlertManager:
         window_start = int(zone["window_start"])
         window_end = int(zone["window_end"])
 
-        embed = discord.Embed(
-            color=discord.Color.red() if kind == "start" else discord.Color.orange()
-        )
-        if kind == "pre":
-            offset_minutes = self.storage.data["config"]["alert_offset_minutes"]
-            embed.title = strings.pre_alert_title(zone["display_name"])
-            embed.description = strings.pre_alert_description(
-                window_start, window_end, offset_minutes
-            )
-        else:
-            embed.title = strings.start_alert_title(zone["display_name"])
-            embed.description = strings.start_alert_description(window_start, window_end)
-        embed.add_field(name="​", value=strings.MAP_REMINDER_NOTE, inline=False)
-
         map_path = MAPS_DIR / f"{zone_key}.png"
         file = discord.File(map_path, filename=f"{zone_key}.png") if map_path.exists() else None
-        if file is not None:
-            embed.set_image(url=f"attachment://{zone_key}.png")
 
-        view = KillButtonView(bot, zone_key) if kind == "start" else None
+        if kind == "pre":
+            embed = build_scouting_embed(self.storage, zone_key)
+            view: discord.ui.View | None = ScoutingView(bot, zone_key)
+        else:
+            embed = discord.Embed(color=discord.Color.red())
+            embed.title = strings.start_alert_title(zone["display_name"])
+            embed.description = strings.start_alert_description(window_start, window_end)
+            embed.add_field(name="​", value=strings.MAP_REMINDER_NOTE, inline=False)
+            if file is not None:
+                embed.set_image(url=f"attachment://{zone_key}.png")
+            view = KillButtonView(bot, zone_key)
 
         try:
             send_kwargs: dict = {"content": role_mention, "embed": embed}

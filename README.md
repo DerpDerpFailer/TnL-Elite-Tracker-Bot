@@ -23,23 +23,27 @@ State is a single JSON file (`/data/elite.json`), written atomically with a
 
 - Each zone has a configurable cooldown. After a kill is logged, the boss is
   expected to respawn somewhere in a **7-minute window** starting `cooldown`
-  after the kill, at one of several possible spawn points in the zone (the
-  bot does not track individual spawn points, only the region-level window).
+  after the kill, at one of several possible **sub-zones** within the region.
 - A single embed message (the "perpetual message") in a configured channel
   shows live status for every zone, using Discord's native `<t:...>`
   timestamps so each member sees times in their own timezone.
 - A background task checks every 30 seconds whether a pre-alert or
   window-open alert is due for any zone, and sends it (with the zone's map
   image attached, if one was uploaded) exactly once per window.
+- The pre-alert includes one **"Scouting `<sub-zone>`" button per sub-zone**:
+  clicking toggles that member in/out of the sub-zone's scout list, and the
+  embed updates live for everyone with who's checking each spot (plus that
+  sub-zone's own map image, sent ephemerally, if one was uploaded).
 - The window-open alert includes an **"Elite killed" button**: anyone can
   click it to log the kill on the spot (equivalent to `/elite-killed` with no
   time argument) without typing a command. The button disables itself and
-  shows who confirmed it once clicked, and keeps working on old alert
-  messages even after a bot restart.
-- All game-side values (cooldowns, zone list, map images, channel, alert role,
-  timezone, admin role) are configured through `/elite-config` — the game is
-  patched weekly, so nothing here should require touching code or redeploying
-  for a balance change.
+  shows who confirmed it once clicked.
+- Both button types are persistent — they keep working on old alert messages
+  even after a bot restart.
+- All game-side values (cooldowns, zones, sub-zones, map images, channel,
+  alert role, timezone, admin role) are configured through `/elite-config` —
+  the game is patched weekly, so nothing here should require touching code or
+  redeploying for a balance change.
 
 ## Discord Developer Portal setup
 
@@ -209,12 +213,15 @@ finer-grained control.
 | `/elite-config admin-role role` | Role allowed to use `/elite-config`, in addition to Manage Server; omit to clear. |
 | `/elite-config alert-offset minutes` | Pre-alert delay before a window opens (default 15). |
 | `/elite-config timezone tz` | IANA timezone used to interpret manual kill times, e.g. `Europe/Paris`. |
-| `/elite-config map zone image` | Upload/replace a zone's map (PNG/JPG), attached to future alerts. |
+| `/elite-config map zone image` | Upload/replace a zone's region-level map (PNG/JPG), attached to alerts. |
 | `/elite-config zone-add nom cooldown` | Add a new zone. |
-| `/elite-config zone-remove zone` | Remove a zone and its history. |
-| `/elite-config zone-reset zone` | Clear a zone's last kill, current window and history — keeps its cooldown and map. Useful to wipe test data or fix a bad entry beyond what `/elite-undo` can revert (it only undoes one step). |
+| `/elite-config zone-remove zone` | Remove a zone, its history, its sub-zones and their maps. |
+| `/elite-config zone-reset zone` | Clear a zone's last kill, current window and history — keeps its cooldown, map and configured sub-zones. Useful to wipe test data or fix a bad entry beyond what `/elite-undo` can revert (it only undoes one step). |
+| `/elite-config subzone-add zone nom` | Add a scouting sub-zone to a zone. |
+| `/elite-config subzone-remove zone subzone` | Remove a sub-zone (and its map) from a zone. |
+| `/elite-config submap zone subzone image` | Upload/replace the map image for one specific sub-zone, sent ephemerally to whoever clicks its "Scouting" button. |
 | `/elite-config repost` | Recreate the perpetual status message if it was deleted by accident, or force an immediate refresh. |
-| `/elite-config show` | Show the full current configuration (channel, roles, offset, timezone, zones and their cooldowns) in one embed. |
+| `/elite-config show` | Show the full current configuration (channel, roles, offset, timezone, zones with their cooldowns and sub-zone counts) in one embed. |
 
 Examples:
 
@@ -230,6 +237,9 @@ Examples:
 /elite-config zone-add nom:Aldheim cooldown:5h
 /elite-config zone-remove zone:Aldheim
 /elite-config zone-reset zone:Laslan
+/elite-config subzone-add zone:Nix nom:Frostbite Ridge
+/elite-config subzone-remove zone:Nix subzone:Frostbite Ridge
+/elite-config submap zone:Laslan subzone:Urstella Fields image:urstella-fields.png
 /elite-config repost
 /elite-config show
 ```
@@ -253,11 +263,17 @@ the eight zones the guild currently tracks:
 These are community estimates and are expected to change after patches —
 update them with `/elite-config cooldown`, no redeploy needed.
 
+Each of these zones is also seeded with the region's known sub-zones (used
+purely for the pre-alert's scouting buttons — kills are still logged at the
+zone level, not per sub-zone): 7 for Laslan, 8 for Stonegard, 6 for Talandre,
+5 for Nix, and 7–8 for each dungeon. Adjust the list later with
+`/elite-config subzone-add` / `subzone-remove`.
+
 Top-level JSON structure:
 
 ```jsonc
 {
-  "version": 2,
+  "version": 3,
   "config": {
     "channel_id": null,
     "alert_channel_id": null,
@@ -276,7 +292,14 @@ Top-level JSON structure:
       "window_start": null,
       "window_end": null,
       "pre_alert_sent": false,
-      "start_alert_sent": false
+      "start_alert_sent": false,
+      "subzones": {
+        "urstella-fields": {
+          "display_name": "Urstella Fields",
+          "scouts": []
+        }
+        // ...
+      }
     }
     // ...
   },
@@ -287,5 +310,9 @@ Top-level JSON structure:
 }
 ```
 
-Map images live alongside it at `/data/maps/<zone>.png`, also persisted in
-the named Docker volume.
+A sub-zone's `scouts` list holds the Discord user IDs currently scouting it
+for the pending window; it's cleared automatically whenever a new kill or
+no-show recalculates that window.
+
+Map images live alongside it in the named Docker volume: region-level maps
+at `/data/maps/<zone>.png`, sub-zone maps at `/data/maps/<zone>__<subzone>.png`.

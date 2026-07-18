@@ -21,3 +21,23 @@ async def zone_autocomplete(
         if current_lower in zone["display_name"].lower()
     ]
     return matches[:25]
+
+
+async def subzone_autocomplete(
+    interaction: discord.Interaction, current: str
+) -> list[app_commands.Choice[str]]:
+    """Filtered by whatever the command's `zone` parameter currently holds —
+    empty until the member picks a zone first."""
+    bot: "EliteBot" = interaction.client  # type: ignore[assignment]
+    zone_key = getattr(interaction.namespace, "zone", None)
+    zone = bot.storage.data["zones"].get(zone_key) if zone_key else None
+    if zone is None:
+        return []
+
+    current_lower = current.lower()
+    matches = [
+        app_commands.Choice(name=subzone["display_name"], value=subzone_key)
+        for subzone_key, subzone in zone["subzones"].items()
+        if current_lower in subzone["display_name"].lower()
+    ]
+    return matches[:25]

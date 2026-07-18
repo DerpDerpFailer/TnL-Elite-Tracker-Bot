@@ -70,15 +70,32 @@ MAP_REMINDER_NOTE = (
 )
 
 
-def pre_alert_title(display_name: str) -> str:
-    return f"⏰ {display_name} spawn window incoming"
-
-
 def pre_alert_description(window_start_ts: int, window_end_ts: int, offset_minutes: int) -> str:
     return (
         f"Spawn window opens in about {offset_minutes} minutes: "
         f"<t:{window_start_ts}:t> → <t:{window_end_ts}:t> (<t:{window_start_ts}:R>)"
     )
+
+
+def scouting_title(display_name: str) -> str:
+    return f"\U0001f526 {display_name} Scouting"
+
+
+def scouting_field_value(mentions: list[str]) -> str:
+    scouting_line = "Scouting: " + (", ".join(mentions) if mentions else "Nobody yet")
+    return f"{scouting_line}\nNumber of Scouts: {len(mentions)}"
+
+
+def scout_button_label(subzone_display_name: str) -> str:
+    return f"Scouting {subzone_display_name}"
+
+
+def scout_confirmed(subzone_display_name: str, zone_display_name: str) -> str:
+    return f"You're now scouting **{subzone_display_name}** for **{zone_display_name}**."
+
+
+def scout_cancelled(subzone_display_name: str) -> str:
+    return f"You're no longer scouting **{subzone_display_name}**."
 
 
 def start_alert_title(display_name: str) -> str:
@@ -284,6 +301,26 @@ def config_zone_reset(display_name: str) -> str:
     )
 
 
+def config_subzone_added(zone_display_name: str, subzone_display_name: str) -> str:
+    return f"Sub-zone **{subzone_display_name}** added to **{zone_display_name}**."
+
+
+def config_subzone_already_exists(zone_display_name: str, subzone_display_name: str) -> str:
+    return f"**{zone_display_name}** already has a sub-zone named **{subzone_display_name}**."
+
+
+def config_subzone_removed(zone_display_name: str, subzone_display_name: str) -> str:
+    return f"Sub-zone **{subzone_display_name}** removed from **{zone_display_name}**."
+
+
+def config_subzone_not_found() -> str:
+    return "Unknown sub-zone for that zone. Pick one from the autocomplete list."
+
+
+def config_submap_updated(zone_display_name: str, subzone_display_name: str) -> str:
+    return f"Map image updated for **{subzone_display_name}** ({zone_display_name})."
+
+
 def config_repost_no_channel() -> str:
     return "No channel is configured yet. Set one first with `/elite-config channel`."
 
@@ -338,11 +375,14 @@ def config_show_timezone_line(tz: str) -> str:
     return f"**Timezone:** `{tz}`"
 
 
-def config_show_zone_line(display_name: str, cooldown_minutes: int, has_map: bool) -> str:
+def config_show_zone_line(
+    display_name: str, cooldown_minutes: int, has_map: bool, subzone_count: int
+) -> str:
     hours = cooldown_minutes // 60
     minutes = cooldown_minutes % 60
     map_marker = " 🗺️" if has_map else ""
-    return f"**{display_name}** — {hours}h{minutes:02d}m{map_marker}"
+    subzone_note = f" ({subzone_count} sub-zones)" if subzone_count else ""
+    return f"**{display_name}** — {hours}h{minutes:02d}m{map_marker}{subzone_note}"
 
 
 # ---------------------------------------------------------------------------

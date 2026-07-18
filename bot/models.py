@@ -8,7 +8,8 @@ from __future__ import annotations
 from enum import Enum
 from typing import Literal, TypedDict
 
-from bot.constants import DEFAULT_ZONES, SCHEMA_VERSION
+from bot.constants import DEFAULT_SUBZONES, DEFAULT_ZONES, SCHEMA_VERSION
+from bot.slugs import slugify
 
 
 class Config(TypedDict):
@@ -21,6 +22,11 @@ class Config(TypedDict):
     admin_role_id: int | None
 
 
+class SubzoneState(TypedDict):
+    display_name: str
+    scouts: list[int]
+
+
 class ZoneState(TypedDict):
     display_name: str
     cooldown_minutes: int
@@ -30,6 +36,7 @@ class ZoneState(TypedDict):
     window_end: float | None
     pre_alert_sent: bool
     start_alert_sent: bool
+    subzones: dict[str, SubzoneState]
 
 
 HistoryEventType = Literal["kill", "noshow"]
@@ -62,7 +69,15 @@ class ZonePhase(str, Enum):
     ACTIVE = "active"
 
 
-def build_zone_state(display_name: str, cooldown_minutes: int) -> ZoneState:
+def build_subzone_state(display_name: str) -> SubzoneState:
+    return SubzoneState(display_name=display_name, scouts=[])
+
+
+def build_zone_state(
+    display_name: str,
+    cooldown_minutes: int,
+    subzone_names: list[str] | None = None,
+) -> ZoneState:
     return ZoneState(
         display_name=display_name,
         cooldown_minutes=cooldown_minutes,
@@ -72,6 +87,9 @@ def build_zone_state(display_name: str, cooldown_minutes: int) -> ZoneState:
         window_end=None,
         pre_alert_sent=False,
         start_alert_sent=False,
+        subzones={
+            slugify(name): build_subzone_state(name) for name in (subzone_names or [])
+        },
     )
 
 
@@ -92,7 +110,9 @@ def build_seed_data() -> RootData:
             admin_role_id=None,
         ),
         zones={
-            slug: build_zone_state(meta["display_name"], meta["cooldown_minutes"])
+            slug: build_zone_state(
+                meta["display_name"], meta["cooldown_minutes"], DEFAULT_SUBZONES.get(slug)
+            )
             for slug, meta in DEFAULT_ZONES.items()
         },
         history={slug: [] for slug in DEFAULT_ZONES},

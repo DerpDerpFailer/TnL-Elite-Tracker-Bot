@@ -14,6 +14,7 @@ from bot import strings
 from bot.alerts import AlertManager
 from bot.config import load_env_config
 from bot.perpetual_message import PerpetualMessageManager
+from bot.scouting import ScoutingView
 from bot.storage import Storage
 from bot.views import KillButtonView
 
@@ -41,11 +42,13 @@ class EliteBot(commands.Bot):
     async def setup_hook(self) -> None:
         self.storage.load_or_seed()
 
-        # Re-register one persistent "Elite killed" button view per known
-        # zone so clicks on alert messages posted before this restart still
-        # route to KillButtonView._on_click.
-        for zone_key in self.storage.data["zones"]:
+        # Re-register one persistent "Elite killed" button view and one
+        # persistent scouting-buttons view per known zone so clicks on alert
+        # messages posted before this restart keep routing correctly.
+        for zone_key, zone in self.storage.data["zones"].items():
             self.add_view(KillButtonView(self, zone_key))
+            if zone["subzones"]:
+                self.add_view(ScoutingView(self, zone_key))
 
         for extension in EXTENSIONS:
             await self.load_extension(extension)

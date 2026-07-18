@@ -18,7 +18,7 @@ import discord
 from discord import app_commands
 
 from bot import domain, strings
-from bot.autocomplete import zone_autocomplete
+from bot.autocomplete import subzone_autocomplete, zone_autocomplete
 from bot.constants import MAPS_DIR
 from bot.timeutil import get_zoneinfo, parse_duration_to_minutes
 
@@ -264,12 +264,17 @@ class AdminConfigGroup(app_commands.Group):
                 return
 
             display_name = storage.data["zones"][zone]["display_name"]
+            subzone_keys = list(storage.data["zones"][zone]["subzones"].keys())
             domain.remove_zone(storage.data, zone)
             await storage.save()
 
         map_path = MAPS_DIR / f"{zone}.png"
         if map_path.exists():
             map_path.unlink()
+        for subzone_key in subzone_keys:
+            submap_path = MAPS_DIR / f"{zone}__{subzone_key}.png"
+            if submap_path.exists():
+                submap_path.unlink()
 
         await interaction.response.send_message(
             strings.config_zone_removed(display_name), ephemeral=True
@@ -297,6 +302,113 @@ class AdminConfigGroup(app_commands.Group):
             strings.config_zone_reset(display_name), ephemeral=True
         )
         await self.bot.perpetual.force_update(self.bot, time.time())
+
+    @app_commands.command(name="subzone-add", description="Add a scouting sub-zone to a zone")
+    @app_commands.describe(
+        zone="Zone to add the sub-zone to", nom="Display name for the new sub-zone"
+    )
+    @app_commands.autocomplete(zone=zone_autocomplete)
+    async def subzone_add(self, interaction: discord.Interaction, zone: str, nom: str) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            if zone not in storage.data["zones"]:
+                await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+                return
+
+            zone_display_name = storage.data["zones"][zone]["display_name"]
+            subzone_key = domain.slugify(nom)
+            if subzone_key in storage.data["zones"][zone]["subzones"]:
+                existing_name = storage.data["zones"][zone]["subzones"][subzone_key][
+                    "display_name"
+                ]
+                await interaction.response.send_message(
+                    strings.config_subzone_already_exists(zone_display_name, existing_name),
+                    ephemeral=True,
+                )
+                return
+
+            domain.add_subzone(storage.data, zone, subzone_key, nom)
+            await storage.save()
+
+        await interaction.response.send_message(
+            strings.config_subzone_added(zone_display_name, nom), ephemeral=True
+        )
+
+    @app_commands.command(
+        name="subzone-remove", description="Remove a scouting sub-zone from a zone"
+    )
+    @app_commands.describe(zone="Zone the sub-zone belongs to", subzone="Sub-zone to remove")
+    @app_commands.autocomplete(zone=zone_autocomplete, subzone=subzone_autocomplete)
+    async def subzone_remove(
+        self, interaction: discord.Interaction, zone: str, subzone: str
+    ) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            if zone not in storage.data["zones"]:
+                await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+                return
+            if subzone not in storage.data["zones"][zone]["subzones"]:
+                await interaction.response.send_message(
+                    strings.config_subzone_not_found(), ephemeral=True
+                )
+                return
+
+            zone_display_name = storage.data["zones"][zone]["display_name"]
+            subzone_display_name = storage.data["zones"][zone]["subzones"][subzone][
+                "display_name"
+            ]
+            domain.remove_subzone(storage.data, zone, subzone)
+            await storage.save()
+
+        submap_path = MAPS_DIR / f"{zone}__{subzone}.png"
+        if submap_path.exists():
+            submap_path.unlink()
+
+        await interaction.response.send_message(
+            strings.config_subzone_removed(zone_display_name, subzone_display_name),
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="submap", description="Upload/replace the map image for a specific sub-zone"
+    )
+    @app_commands.describe(
+        zone="Zone the sub-zone belongs to",
+        subzone="Sub-zone to update the map for",
+        image="PNG or JPG map image, e.g. a close-up crop with the spawn pin marked",
+    )
+    @app_commands.autocomplete(zone=zone_autocomplete, subzone=subzone_autocomplete)
+    async def submap(
+        self,
+        interaction: discord.Interaction,
+        zone: str,
+        subzone: str,
+        image: discord.Attachment,
+    ) -> None:
+        storage = self.bot.storage
+        if zone not in storage.data["zones"]:
+            await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+            return
+        if subzone not in storage.data["zones"][zone]["subzones"]:
+            await interaction.response.send_message(
+                strings.config_subzone_not_found(), ephemeral=True
+            )
+            return
+
+        content_type = (image.content_type or "").lower()
+        if not (content_type.startswith("image/png") or content_type.startswith("image/jpeg")):
+            await interaction.response.send_message(strings.config_map_invalid_type(), ephemeral=True)
+            return
+
+        MAPS_DIR.mkdir(parents=True, exist_ok=True)
+        await image.save(MAPS_DIR / f"{zone}__{subzone}.png")
+
+        zone_display_name = storage.data["zones"][zone]["display_name"]
+        subzone_display_name = storage.data["zones"][zone]["subzones"][subzone]["display_name"]
+        await interaction.response.send_message(
+            strings.config_submap_updated(zone_display_name, subzone_display_name),
+            ephemeral=True,
+        )
 
     @app_commands.command(
         name="repost",
@@ -340,6 +452,7 @@ class AdminConfigGroup(app_commands.Group):
                 zone["display_name"],
                 zone["cooldown_minutes"],
                 (MAPS_DIR / f"{key}.png").exists(),
+                len(zone["subzones"]),
             )
             for key, zone in storage.data["zones"].items()
         ]
