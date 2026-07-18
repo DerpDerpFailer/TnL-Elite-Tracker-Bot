@@ -138,10 +138,7 @@ class AlertManager:
         for chunk in chunks[1:]:
             continuation_view = ScoutingView(bot, zone_key, chunk)
             try:
-                await channel.send(
-                    content=strings.scouting_continued_note(zone["display_name"]),
-                    view=continuation_view,
-                )
+                await channel.send(view=continuation_view)
             except discord.Forbidden:
                 logger.warning(
                     strings.LOG_MISSING_PERMISSIONS,

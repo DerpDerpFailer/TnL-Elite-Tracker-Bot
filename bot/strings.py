@@ -98,10 +98,6 @@ def scout_cancelled(subzone_display_name: str) -> str:
     return f"You're no longer scouting **{subzone_display_name}**."
 
 
-def scouting_continued_note(display_name: str) -> str:
-    return f"More **{display_name}** scouting spots:"
-
-
 def start_alert_title(display_name: str) -> str:
     return f"\U0001f6a8 {display_name} spawn time has arrived"
 
