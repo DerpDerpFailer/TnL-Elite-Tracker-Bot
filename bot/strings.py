@@ -30,21 +30,33 @@ def status_embed_updated_line(updated_ts: int) -> str:
     return f"Last updated <t:{updated_ts}:R>"
 
 
-def zone_line_no_data(emoji: str, display_name: str) -> str:
-    return f"{emoji} **{display_name}** — no kill recorded yet"
+def zone_field_name(emoji: str, display_name: str) -> str:
+    return f"{emoji} {display_name}"
 
 
-def zone_line(
-    emoji: str,
-    display_name: str,
-    last_kill_ts: int,
-    window_start_ts: int,
-    window_end_ts: int,
-) -> str:
+def _format_duration_words(total_minutes: int) -> str:
+    hours, minutes = divmod(total_minutes, 60)
+    parts = []
+    if hours:
+        parts.append(f"{hours} hour" + ("s" if hours != 1 else ""))
+    if minutes:
+        parts.append(f"{minutes} minute" + ("s" if minutes != 1 else ""))
+    return " ".join(parts) if parts else "0 minutes"
+
+
+def zone_field_value_no_data(cooldown_minutes: int) -> str:
     return (
-        f"{emoji} **{display_name}** — last kill <t:{last_kill_ts}:R>\n"
-        f"⤷ next window <t:{window_start_ts}:t> → <t:{window_end_ts}:t> "
-        f"(<t:{window_start_ts}:R>)"
+        "No kill recorded yet\n"
+        f"Cooldown: {_format_duration_words(cooldown_minutes)}"
+    )
+
+
+def zone_field_value(last_kill_ts: int, window_start_ts: int, cooldown_minutes: int) -> str:
+    return (
+        f"Respawning: <t:{window_start_ts}:R>\n"
+        f"Last killed: <t:{last_kill_ts}:F> (<t:{last_kill_ts}:R>)\n"
+        f"Spawn time: <t:{window_start_ts}:F>\n"
+        f"Cooldown: {_format_duration_words(cooldown_minutes)}"
     )
 
 

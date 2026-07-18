@@ -33,17 +33,16 @@ def build_status_embed(storage: Storage, now: float) -> discord.Embed:
     for zone in storage.data["zones"].values():
         phase = zone_phase(zone, now, IMMINENT_THRESHOLD_MINUTES)
         emoji = strings.PHASE_EMOJI[phase]
+        field_name = strings.zone_field_name(emoji, zone["display_name"])
         if phase is ZonePhase.NO_DATA:
-            line = strings.zone_line_no_data(emoji, zone["display_name"])
+            field_value = strings.zone_field_value_no_data(zone["cooldown_minutes"])
         else:
-            line = strings.zone_line(
-                emoji,
-                zone["display_name"],
+            field_value = strings.zone_field_value(
                 int(zone["last_kill_at"]),
                 int(zone["window_start"]),
-                int(zone["window_end"]),
+                zone["cooldown_minutes"],
             )
-        embed.add_field(name="​", value=line, inline=False)
+        embed.add_field(name=field_name, value=field_value, inline=False)
     embed.add_field(name="​", value=strings.status_embed_updated_line(int(now)), inline=False)
     embed.set_footer(text=strings.STATUS_EMBED_FOOTER)
     return embed
