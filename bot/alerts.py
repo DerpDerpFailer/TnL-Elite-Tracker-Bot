@@ -15,6 +15,7 @@ from bot.constants import MAPS_DIR
 from bot.models import ZoneState
 from bot.perpetual_message import PerpetualMessageManager
 from bot.storage import Storage
+from bot.views import KillButtonView
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,7 @@ class AlertManager:
             sent_any = False
             for key, kind in due:
                 zone = self.storage.data["zones"][key]
-                sent = await self._send_alert(channel, key, zone, kind, role_mention)
+                sent = await self._send_alert(bot, channel, key, zone, kind, role_mention)
                 sent_any = sent_any or sent
 
             if sent_any:
@@ -88,6 +89,7 @@ class AlertManager:
 
     async def _send_alert(
         self,
+        bot: discord.Client,
         channel: discord.abc.Messageable,
         zone_key: str,
         zone: ZoneState,
@@ -116,11 +118,15 @@ class AlertManager:
         if file is not None:
             embed.set_image(url=f"attachment://{zone_key}.png")
 
+        view = KillButtonView(bot, zone_key) if kind == "start" else None
+
         try:
+            send_kwargs: dict = {"content": role_mention, "embed": embed}
             if file is not None:
-                await channel.send(content=role_mention, embed=embed, file=file)
-            else:
-                await channel.send(content=role_mention, embed=embed)
+                send_kwargs["file"] = file
+            if view is not None:
+                send_kwargs["view"] = view
+            await channel.send(**send_kwargs)
         except discord.Forbidden:
             logger.warning(strings.LOG_MISSING_PERMISSIONS, "send an alert", getattr(channel, "id", "?"))
             return False

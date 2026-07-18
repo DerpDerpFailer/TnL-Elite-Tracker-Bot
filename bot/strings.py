@@ -80,6 +80,13 @@ def start_alert_description(window_start_ts: int, window_end_ts: int) -> str:
     )
 
 
+KILL_BUTTON_LABEL = "Elite killed"
+
+
+def kill_button_confirmed_label(user_name: str) -> str:
+    return f"✅ Killed by {user_name}"
+
+
 # ---------------------------------------------------------------------------
 # /elite-killed
 # ---------------------------------------------------------------------------

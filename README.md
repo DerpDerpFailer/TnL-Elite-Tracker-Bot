@@ -31,6 +31,11 @@ State is a single JSON file (`/data/elite.json`), written atomically with a
 - A background task checks every 30 seconds whether a pre-alert or
   window-open alert is due for any zone, and sends it (with the zone's map
   image attached, if one was uploaded) exactly once per window.
+- The window-open alert includes an **"Elite killed" button**: anyone can
+  click it to log the kill on the spot (equivalent to `/elite-killed` with no
+  time argument) without typing a command. The button disables itself and
+  shows who confirmed it once clicked, and keeps working on old alert
+  messages even after a bot restart.
 - All game-side values (cooldowns, zone list, map images, channel, alert role,
   timezone, admin role) are configured through `/elite-config` — the game is
   patched weekly, so nothing here should require touching code or redeploying
