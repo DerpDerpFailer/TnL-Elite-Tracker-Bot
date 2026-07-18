@@ -20,6 +20,7 @@ from discord import app_commands
 from bot import domain, strings
 from bot.autocomplete import subzone_autocomplete, zone_autocomplete
 from bot.constants import MAPS_DIR
+from bot.interactions import send_ephemeral
 from bot.timeutil import get_zoneinfo, parse_duration_to_minutes
 
 if TYPE_CHECKING:
@@ -51,7 +52,7 @@ class AdminConfigGroup(app_commands.Group):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if _has_admin_access(interaction, self.bot):
             return True
-        await interaction.response.send_message(strings.NO_PERMISSION, ephemeral=True)
+        await send_ephemeral(interaction, strings.NO_PERMISSION)
         return False
 
     @app_commands.command(name="cooldown", description="Set the respawn cooldown for a zone")
@@ -61,22 +62,18 @@ class AdminConfigGroup(app_commands.Group):
         storage = self.bot.storage
         async with storage.lock:
             if zone not in storage.data["zones"]:
-                await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+                await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
                 return
             try:
                 minutes = parse_duration_to_minutes(duree)
             except ValueError:
-                await interaction.response.send_message(
-                    strings.config_invalid_duration(duree), ephemeral=True
-                )
+                await send_ephemeral(interaction, strings.config_invalid_duration(duree))
                 return
             storage.data["zones"][zone]["cooldown_minutes"] = minutes
             display_name = storage.data["zones"][zone]["display_name"]
             await storage.save()
 
-        await interaction.response.send_message(
-            strings.config_cooldown_updated(display_name, minutes), ephemeral=True
-        )
+        await send_ephemeral(interaction, strings.config_cooldown_updated(display_name, minutes))
         await self.bot.perpetual.force_update(self.bot, time.time())
 
     @app_commands.command(
@@ -90,9 +87,7 @@ class AdminConfigGroup(app_commands.Group):
             storage.data["config"]["perpetual_message_id"] = None
             await storage.save()
 
-        await interaction.response.send_message(
-            strings.config_channel_updated(canal.mention), ephemeral=True
-        )
+        await send_ephemeral(interaction, strings.config_channel_updated(canal.mention))
         await self.bot.perpetual.force_update(self.bot, time.time())
 
     @app_commands.command(
@@ -111,13 +106,9 @@ class AdminConfigGroup(app_commands.Group):
             await storage.save()
 
         if canal is not None:
-            await interaction.response.send_message(
-                strings.config_alert_channel_updated(canal.mention), ephemeral=True
-            )
+            await send_ephemeral(interaction, strings.config_alert_channel_updated(canal.mention))
         else:
-            await interaction.response.send_message(
-                strings.config_alert_channel_cleared(), ephemeral=True
-            )
+            await send_ephemeral(interaction, strings.config_alert_channel_cleared())
 
     @app_commands.command(
         name="alert-role", description="Set (or clear) the role pinged in alerts"
@@ -132,13 +123,9 @@ class AdminConfigGroup(app_commands.Group):
             await storage.save()
 
         if role is not None:
-            await interaction.response.send_message(
-                strings.config_alert_role_updated(role.mention), ephemeral=True
-            )
+            await send_ephemeral(interaction, strings.config_alert_role_updated(role.mention))
         else:
-            await interaction.response.send_message(
-                strings.config_alert_role_cleared(), ephemeral=True
-            )
+            await send_ephemeral(interaction, strings.config_alert_role_cleared())
 
     @app_commands.command(
         name="admin-role", description="Set (or clear) the role allowed to use /elite-config"
@@ -153,13 +140,9 @@ class AdminConfigGroup(app_commands.Group):
             await storage.save()
 
         if role is not None:
-            await interaction.response.send_message(
-                strings.config_admin_role_updated(role.mention), ephemeral=True
-            )
+            await send_ephemeral(interaction, strings.config_admin_role_updated(role.mention))
         else:
-            await interaction.response.send_message(
-                strings.config_admin_role_cleared(), ephemeral=True
-            )
+            await send_ephemeral(interaction, strings.config_admin_role_cleared())
 
     @app_commands.command(
         name="alert-offset", description="Set the pre-alert delay before a window opens"
@@ -173,9 +156,7 @@ class AdminConfigGroup(app_commands.Group):
             storage.data["config"]["alert_offset_minutes"] = minutes
             await storage.save()
 
-        await interaction.response.send_message(
-            strings.config_alert_offset_updated(minutes), ephemeral=True
-        )
+        await send_ephemeral(interaction, strings.config_alert_offset_updated(minutes))
 
     @app_commands.command(
         name="timezone", description="Set the timezone used to interpret manual kill times"
@@ -185,9 +166,7 @@ class AdminConfigGroup(app_commands.Group):
         try:
             get_zoneinfo(tz)
         except ZoneInfoNotFoundError:
-            await interaction.response.send_message(
-                strings.config_timezone_invalid(tz), ephemeral=True
-            )
+            await send_ephemeral(interaction, strings.config_timezone_invalid(tz))
             return
 
         storage = self.bot.storage
@@ -195,7 +174,7 @@ class AdminConfigGroup(app_commands.Group):
             storage.data["config"]["timezone"] = tz
             await storage.save()
 
-        await interaction.response.send_message(strings.config_timezone_updated(tz), ephemeral=True)
+        await send_ephemeral(interaction, strings.config_timezone_updated(tz))
 
     @app_commands.command(name="map", description="Upload/replace the map image for a zone")
     @app_commands.describe(
@@ -208,19 +187,19 @@ class AdminConfigGroup(app_commands.Group):
     ) -> None:
         storage = self.bot.storage
         if zone not in storage.data["zones"]:
-            await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+            await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
             return
 
         content_type = (image.content_type or "").lower()
         if not (content_type.startswith("image/png") or content_type.startswith("image/jpeg")):
-            await interaction.response.send_message(strings.config_map_invalid_type(), ephemeral=True)
+            await send_ephemeral(interaction, strings.config_map_invalid_type())
             return
 
         MAPS_DIR.mkdir(parents=True, exist_ok=True)
         await image.save(MAPS_DIR / f"{zone}.png")
 
         display_name = storage.data["zones"][zone]["display_name"]
-        await interaction.response.send_message(strings.config_map_updated(display_name), ephemeral=True)
+        await send_ephemeral(interaction, strings.config_map_updated(display_name))
 
     @app_commands.command(name="zone-add", description="Add a new zone to track")
     @app_commands.describe(
@@ -232,25 +211,19 @@ class AdminConfigGroup(app_commands.Group):
             try:
                 minutes = parse_duration_to_minutes(cooldown)
             except ValueError:
-                await interaction.response.send_message(
-                    strings.config_invalid_duration(cooldown), ephemeral=True
-                )
+                await send_ephemeral(interaction, strings.config_invalid_duration(cooldown))
                 return
 
             key = domain.slugify(nom)
             if key in storage.data["zones"]:
                 existing_name = storage.data["zones"][key]["display_name"]
-                await interaction.response.send_message(
-                    strings.config_zone_already_exists(existing_name), ephemeral=True
-                )
+                await send_ephemeral(interaction, strings.config_zone_already_exists(existing_name))
                 return
 
             domain.add_zone(storage.data, key, nom, minutes)
             await storage.save()
 
-        await interaction.response.send_message(
-            strings.config_zone_added(nom, minutes), ephemeral=True
-        )
+        await send_ephemeral(interaction, strings.config_zone_added(nom, minutes))
         await self.bot.perpetual.force_update(self.bot, time.time())
 
     @app_commands.command(
@@ -265,14 +238,10 @@ class AdminConfigGroup(app_commands.Group):
                 await storage.save()
 
         if added:
-            await interaction.response.send_message(
-                strings.config_sync_zones_added(added), ephemeral=True
-            )
+            await send_ephemeral(interaction, strings.config_sync_zones_added(added))
             await self.bot.perpetual.force_update(self.bot, time.time())
         else:
-            await interaction.response.send_message(
-                strings.config_sync_zones_up_to_date(), ephemeral=True
-            )
+            await send_ephemeral(interaction, strings.config_sync_zones_up_to_date())
 
     @app_commands.command(name="zone-remove", description="Remove a tracked zone and its history")
     @app_commands.describe(zone="Zone to remove")
@@ -281,7 +250,7 @@ class AdminConfigGroup(app_commands.Group):
         storage = self.bot.storage
         async with storage.lock:
             if zone not in storage.data["zones"]:
-                await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+                await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
                 return
 
             display_name = storage.data["zones"][zone]["display_name"]
@@ -297,9 +266,7 @@ class AdminConfigGroup(app_commands.Group):
             if submap_path.exists():
                 submap_path.unlink()
 
-        await interaction.response.send_message(
-            strings.config_zone_removed(display_name), ephemeral=True
-        )
+        await send_ephemeral(interaction, strings.config_zone_removed(display_name))
         await self.bot.perpetual.force_update(self.bot, time.time())
 
     @app_commands.command(
@@ -312,16 +279,14 @@ class AdminConfigGroup(app_commands.Group):
         storage = self.bot.storage
         async with storage.lock:
             if zone not in storage.data["zones"]:
-                await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+                await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
                 return
 
             display_name = storage.data["zones"][zone]["display_name"]
             domain.reset_zone(storage.data, zone)
             await storage.save()
 
-        await interaction.response.send_message(
-            strings.config_zone_reset(display_name), ephemeral=True
-        )
+        await send_ephemeral(interaction, strings.config_zone_reset(display_name))
         await self.bot.perpetual.force_update(self.bot, time.time())
 
     @app_commands.command(name="subzone-add", description="Add a scouting sub-zone to a zone")
@@ -333,7 +298,7 @@ class AdminConfigGroup(app_commands.Group):
         storage = self.bot.storage
         async with storage.lock:
             if zone not in storage.data["zones"]:
-                await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+                await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
                 return
 
             zone_display_name = storage.data["zones"][zone]["display_name"]
@@ -342,18 +307,15 @@ class AdminConfigGroup(app_commands.Group):
                 existing_name = storage.data["zones"][zone]["subzones"][subzone_key][
                     "display_name"
                 ]
-                await interaction.response.send_message(
-                    strings.config_subzone_already_exists(zone_display_name, existing_name),
-                    ephemeral=True,
+                await send_ephemeral(
+                    interaction, strings.config_subzone_already_exists(zone_display_name, existing_name)
                 )
                 return
 
             domain.add_subzone(storage.data, zone, subzone_key, nom)
             await storage.save()
 
-        await interaction.response.send_message(
-            strings.config_subzone_added(zone_display_name, nom), ephemeral=True
-        )
+        await send_ephemeral(interaction, strings.config_subzone_added(zone_display_name, nom))
 
     @app_commands.command(
         name="subzone-remove", description="Remove a scouting sub-zone from a zone"
@@ -366,12 +328,10 @@ class AdminConfigGroup(app_commands.Group):
         storage = self.bot.storage
         async with storage.lock:
             if zone not in storage.data["zones"]:
-                await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+                await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
                 return
             if subzone not in storage.data["zones"][zone]["subzones"]:
-                await interaction.response.send_message(
-                    strings.config_subzone_not_found(), ephemeral=True
-                )
+                await send_ephemeral(interaction, strings.config_subzone_not_found())
                 return
 
             zone_display_name = storage.data["zones"][zone]["display_name"]
@@ -385,9 +345,8 @@ class AdminConfigGroup(app_commands.Group):
         if submap_path.exists():
             submap_path.unlink()
 
-        await interaction.response.send_message(
-            strings.config_subzone_removed(zone_display_name, subzone_display_name),
-            ephemeral=True,
+        await send_ephemeral(
+            interaction, strings.config_subzone_removed(zone_display_name, subzone_display_name)
         )
 
     @app_commands.command(
@@ -408,17 +367,15 @@ class AdminConfigGroup(app_commands.Group):
     ) -> None:
         storage = self.bot.storage
         if zone not in storage.data["zones"]:
-            await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+            await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
             return
         if subzone not in storage.data["zones"][zone]["subzones"]:
-            await interaction.response.send_message(
-                strings.config_subzone_not_found(), ephemeral=True
-            )
+            await send_ephemeral(interaction, strings.config_subzone_not_found())
             return
 
         content_type = (image.content_type or "").lower()
         if not (content_type.startswith("image/png") or content_type.startswith("image/jpeg")):
-            await interaction.response.send_message(strings.config_map_invalid_type(), ephemeral=True)
+            await send_ephemeral(interaction, strings.config_map_invalid_type())
             return
 
         MAPS_DIR.mkdir(parents=True, exist_ok=True)
@@ -426,9 +383,8 @@ class AdminConfigGroup(app_commands.Group):
 
         zone_display_name = storage.data["zones"][zone]["display_name"]
         subzone_display_name = storage.data["zones"][zone]["subzones"][subzone]["display_name"]
-        await interaction.response.send_message(
-            strings.config_submap_updated(zone_display_name, subzone_display_name),
-            ephemeral=True,
+        await send_ephemeral(
+            interaction, strings.config_submap_updated(zone_display_name, subzone_display_name)
         )
 
     @app_commands.command(
@@ -437,14 +393,10 @@ class AdminConfigGroup(app_commands.Group):
     )
     async def repost(self, interaction: discord.Interaction) -> None:
         if self.bot.storage.data["config"]["channel_id"] is None:
-            await interaction.response.send_message(
-                strings.config_repost_no_channel(), ephemeral=True
-            )
+            await send_ephemeral(interaction, strings.config_repost_no_channel())
             return
 
-        await interaction.response.send_message(
-            strings.config_repost_confirmation(), ephemeral=True
-        )
+        await send_ephemeral(interaction, strings.config_repost_confirmation())
         await self.bot.perpetual.force_update(self.bot, time.time())
 
     @app_commands.command(name="show", description="Show the current tracker configuration")
@@ -487,7 +439,7 @@ class AdminConfigGroup(app_commands.Group):
             value="\n".join(zone_lines) if zone_lines else strings.CONFIG_SHOW_NO_ZONES,
             inline=False,
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await send_ephemeral(interaction, embed=embed)
 
 
 async def setup(bot: "EliteBot") -> None:

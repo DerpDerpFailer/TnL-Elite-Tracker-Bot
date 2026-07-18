@@ -63,6 +63,9 @@ State is a single JSON file (`/data/elite.json`), written atomically with a
   the "Elite killed" button added at spawn time too.
 - All buttons are persistent — they keep working on old alert messages even
   after a bot restart.
+- Every ephemeral reply (command confirmations, errors, button feedback) is
+  only visible to the person who triggered it and auto-deletes itself about
+  12 seconds later, so it doesn't linger for them to dismiss by hand.
 - All game-side values (cooldowns, zones, sub-zones, map images, channel,
   alert role, timezone, admin role) are configured through `/elite-config` —
   the game is patched weekly, so nothing here should require touching code or

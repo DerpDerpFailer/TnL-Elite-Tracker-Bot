@@ -39,6 +39,7 @@ import discord
 
 from bot import domain, strings
 from bot.constants import MAPS_DIR
+from bot.interactions import send_ephemeral
 from bot.models import ScoutingMessageRef, ZoneState
 
 if TYPE_CHECKING:
@@ -318,7 +319,7 @@ class ScoutingView(discord.ui.View):
         async with storage.lock:
             zone = storage.data["zones"].get(self.zone_key)
             if zone is None or subzone_key not in zone["subzones"]:
-                await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+                await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
                 return
 
             now_scouting = domain.toggle_scout(
@@ -368,21 +369,17 @@ class ScoutingView(discord.ui.View):
             else None
         )
 
-        kwargs: dict = {"content": confirmation, "ephemeral": True}
+        ephemeral_kwargs: dict = {}
         if file is not None:
-            kwargs["file"] = file
-
-        if interaction.response.is_done():
-            await interaction.followup.send(**kwargs)
-        else:
-            await interaction.response.send_message(**kwargs)
+            ephemeral_kwargs["file"] = file
+        await send_ephemeral(interaction, confirmation, **ephemeral_kwargs)
 
     async def _on_found_click(self, interaction: discord.Interaction, subzone_key: str) -> None:
         storage = self.bot.storage
         async with storage.lock:
             zone = storage.data["zones"].get(self.zone_key)
             if zone is None or subzone_key not in zone["subzones"]:
-                await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+                await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
                 return
 
             zone_display_name = zone["display_name"]
@@ -471,10 +468,7 @@ class ScoutingView(discord.ui.View):
                     await storage.save()
 
         confirmation = strings.found_confirmed(subzone_display_name)
-        if interaction.response.is_done():
-            await interaction.followup.send(confirmation, ephemeral=True)
-        else:
-            await interaction.response.send_message(confirmation, ephemeral=True)
+        await send_ephemeral(interaction, confirmation)
 
     async def _on_kill_click(self, interaction: discord.Interaction, subzone_key: str) -> None:
         try:
@@ -488,11 +482,11 @@ class ScoutingView(discord.ui.View):
             self.bot, self.zone_key, subzone_key, interaction.user.id, str(interaction.user)
         )
         if zone_state is None:
-            await interaction.followup.send(strings.ZONE_NOT_FOUND, ephemeral=True)
+            await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
             return
 
         confirmation = strings.killed_confirmation(zone_state["display_name"], int(zone_state["spawn_at"]))
-        await interaction.followup.send(confirmation, ephemeral=True)
+        await send_ephemeral(interaction, confirmation)
 
     async def _edit_message(self, ref: ScoutingMessageRef, **fields) -> None:
         try:
@@ -547,18 +541,18 @@ class FoundAnnouncementView(discord.ui.View):
             self.bot, self.zone_key, self.subzone_key, interaction.user.id, str(interaction.user)
         )
         if zone_state is None:
-            await interaction.followup.send(strings.ZONE_NOT_FOUND, ephemeral=True)
+            await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
             return
 
         confirmation = strings.killed_confirmation(zone_state["display_name"], int(zone_state["spawn_at"]))
-        await interaction.followup.send(confirmation, ephemeral=True)
+        await send_ephemeral(interaction, confirmation)
 
     async def _on_undo_click(self, interaction: discord.Interaction) -> None:
         storage = self.bot.storage
         async with storage.lock:
             zone = storage.data["zones"].get(self.zone_key)
             if zone is None:
-                await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+                await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
                 return
 
             zone_display_name = zone["display_name"]
@@ -601,4 +595,4 @@ class FoundAnnouncementView(discord.ui.View):
                 "Failed to delete elite-found announcement for %s: %s", self.zone_key, exc
             )
 
-        await interaction.followup.send(strings.found_undone(zone_display_name), ephemeral=True)
+        await send_ephemeral(interaction, strings.found_undone(zone_display_name))

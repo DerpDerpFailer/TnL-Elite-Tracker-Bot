@@ -13,6 +13,7 @@ from discord.ext import commands
 from bot import strings
 from bot.alerts import AlertManager
 from bot.config import load_env_config
+from bot.interactions import send_ephemeral
 from bot.perpetual_message import PerpetualMessageManager
 from bot.scouting import FoundAnnouncementView, ScoutingView, chunk_subzone_keys
 from bot.storage import Storage
@@ -97,10 +98,7 @@ async def main() -> None:
         interaction: discord.Interaction, error: app_commands.AppCommandError
     ) -> None:
         logger.exception("Unhandled application command error", exc_info=error)
-        if interaction.response.is_done():
-            await interaction.followup.send(strings.GENERIC_ERROR, ephemeral=True)
-        else:
-            await interaction.response.send_message(strings.GENERIC_ERROR, ephemeral=True)
+        await send_ephemeral(interaction, strings.GENERIC_ERROR)
 
     async with bot:
         await bot.start(env.discord_token)

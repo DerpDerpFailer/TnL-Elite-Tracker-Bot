@@ -11,6 +11,7 @@ from discord.ext import commands
 
 from bot import domain, strings
 from bot.autocomplete import zone_autocomplete
+from bot.interactions import send_ephemeral
 from bot.timeutil import get_zoneinfo, parse_zone_datetime, to_epoch
 
 if TYPE_CHECKING:
@@ -37,7 +38,7 @@ class MemberCommands(commands.Cog):
         storage = self.bot.storage
         async with storage.lock:
             if zone not in storage.data["zones"]:
-                await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+                await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
                 return
 
             tz = get_zoneinfo(storage.data["config"]["timezone"])
@@ -45,9 +46,7 @@ class MemberCommands(commands.Cog):
             try:
                 kill_dt = parse_zone_datetime(heure, tz, now_dt)
             except ValueError:
-                await interaction.response.send_message(
-                    strings.killed_invalid_time(heure or ""), ephemeral=True
-                )
+                await send_ephemeral(interaction, strings.killed_invalid_time(heure or ""))
                 return
 
             timestamp = to_epoch(kill_dt)
@@ -56,9 +55,9 @@ class MemberCommands(commands.Cog):
             )
             await storage.save()
 
-        await interaction.response.send_message(
+        await send_ephemeral(
+            interaction,
             strings.killed_confirmation(zone_state["display_name"], int(zone_state["spawn_at"])),
-            ephemeral=True,
         )
         await self.bot.perpetual.force_update(self.bot, time.time())
 
@@ -72,7 +71,7 @@ class MemberCommands(commands.Cog):
         storage = self.bot.storage
         async with storage.lock:
             if zone not in storage.data["zones"]:
-                await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+                await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
                 return
 
             display_name = storage.data["zones"][zone]["display_name"]
@@ -80,15 +79,13 @@ class MemberCommands(commands.Cog):
                 storage.data, zone, time.time(), interaction.user.id, str(interaction.user)
             )
             if zone_state is None:
-                await interaction.response.send_message(
-                    strings.noshow_no_window(display_name), ephemeral=True
-                )
+                await send_ephemeral(interaction, strings.noshow_no_window(display_name))
                 return
             await storage.save()
 
-        await interaction.response.send_message(
+        await send_ephemeral(
+            interaction,
             strings.noshow_confirmation(zone_state["display_name"], int(zone_state["spawn_at"])),
-            ephemeral=True,
         )
         await self.bot.perpetual.force_update(self.bot, time.time())
 
@@ -101,21 +98,17 @@ class MemberCommands(commands.Cog):
         storage = self.bot.storage
         async with storage.lock:
             if zone not in storage.data["zones"]:
-                await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+                await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
                 return
 
             display_name = storage.data["zones"][zone]["display_name"]
             undone = domain.undo_last(storage.data, zone)
             if not undone:
-                await interaction.response.send_message(
-                    strings.undo_nothing_to_undo(display_name), ephemeral=True
-                )
+                await send_ephemeral(interaction, strings.undo_nothing_to_undo(display_name))
                 return
             await storage.save()
 
-        await interaction.response.send_message(
-            strings.undo_confirmation(display_name), ephemeral=True
-        )
+        await send_ephemeral(interaction, strings.undo_confirmation(display_name))
         await self.bot.perpetual.force_update(self.bot, time.time())
 
     @app_commands.command(
@@ -144,7 +137,7 @@ class MemberCommands(commands.Cog):
             description="\n".join(lines) if lines else "No zones configured.",
             color=discord.Color.blurple(),
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await send_ephemeral(interaction, embed=embed)
 
     @app_commands.command(
         name="elite-stats",
@@ -155,7 +148,7 @@ class MemberCommands(commands.Cog):
     async def elite_stats(self, interaction: discord.Interaction, zone: str) -> None:
         storage = self.bot.storage
         if zone not in storage.data["zones"]:
-            await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+            await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
             return
 
         zone_state = storage.data["zones"][zone]
@@ -163,9 +156,7 @@ class MemberCommands(commands.Cog):
         intervals = domain.kill_intervals_minutes(history)
 
         if not intervals:
-            await interaction.response.send_message(
-                strings.stats_no_data(zone_state["display_name"]), ephemeral=True
-            )
+            await send_ephemeral(interaction, strings.stats_no_data(zone_state["display_name"]))
             return
 
         lines: list[str] = []
@@ -187,7 +178,7 @@ class MemberCommands(commands.Cog):
             description="\n".join(lines),
             color=discord.Color.teal(),
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await send_ephemeral(interaction, embed=embed)
 
 
 async def setup(bot: "EliteBot") -> None:
