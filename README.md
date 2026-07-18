@@ -15,6 +15,7 @@ State is a single JSON file (`/data/elite.json`), written atomically with a
 - [Discord Developer Portal setup](#discord-developer-portal-setup)
 - [Invite URL](#invite-url)
 - [Local development](#local-development)
+- [Running tests](#running-tests)
 - [Deploying with Portainer](#deploying-with-portainer)
 - [Updating the bot](#updating-the-bot)
 - [Command reference](#command-reference)
@@ -140,6 +141,26 @@ the container. For a genuinely local run outside Docker, either create
 `/data` locally (requires permissions) or run via `docker compose` as
 described below — that's the supported path for anything beyond a quick
 syntax check.
+
+## Running tests
+
+The test suite covers the pure logic (cooldown/duration/date parsing, kill/
+no-show/undo/sub-zone domain logic, the JSON schema migrations, embed/button
+construction) and the interactive scouting/found/kill/undo button flows
+using lightweight fake Discord objects (`tests/fakes.py`) — no live bot
+token or gateway connection needed.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+
+python -m pytest
+```
+
+Requires Python 3.12+ (same as the bot itself). A GitHub Actions workflow
+(`.github/workflows/tests.yml`) runs the same suite on every push/PR to
+`main`.
 
 ## Deploying with Portainer
 
