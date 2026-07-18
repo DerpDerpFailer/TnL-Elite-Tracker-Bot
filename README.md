@@ -45,12 +45,13 @@ State is a single JSON file (`/data/elite.json`), written atomically with a
   one was uploaded.
 - Once the spawn time is reached, that same scouting message is edited
   in-place (title → "... Scouting — Spawn Due", no new message, no ping) to
-  add a third button per row: **"Elite killed"**. Scouting/Elite Found stay
-  active (the boss may not spawn exactly on schedule), but clicking "Elite
-  killed" — on whichever sub-zone row it actually died in — disables every
-  button for the zone for good, records that sub-zone against the kill (see
-  `/elite-status` and the perpetual message), and resets the timer. It's the
-  button equivalent of `/elite-killed`, with no separate confirmation embed.
+  add a third button per row: a plain 💀 **"Elite killed"** button (icon
+  only, to keep the row compact). Scouting/Elite Found stay active (the
+  boss may not spawn exactly on schedule), but clicking 💀 — on whichever
+  sub-zone row it actually died in — disables every button for the zone for
+  good, records that sub-zone against the kill (see `/elite-status` and the
+  perpetual message), and resets the timer. It's the button equivalent of
+  `/elite-killed`, with no separate confirmation embed.
 - Discord caps a message at 5 button rows, so zones with more than 5
   sub-zones get extra messages for the rest of the buttons — all of them
   stay in sync with the same shared embed on the first message, and all get

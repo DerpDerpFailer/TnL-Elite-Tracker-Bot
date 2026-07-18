@@ -141,7 +141,7 @@ class ScoutingView(discord.ui.View):
 
         if not subzone_keys:
             if show_kill_button:
-                self._add_kill_button(zone_key, NO_SUBZONE_KEY, strings.KILL_BUTTON_LABEL, 0, kill_disabled)
+                self._add_kill_button(zone_key, NO_SUBZONE_KEY, 0, kill_disabled)
             return
 
         for row, subzone_key in enumerate(subzone_keys):
@@ -170,15 +170,11 @@ class ScoutingView(discord.ui.View):
             self.add_item(found_button)
 
             if show_kill_button:
-                self._add_kill_button(
-                    zone_key, subzone_key, strings.KILL_BUTTON_LABEL, row, kill_disabled
-                )
+                self._add_kill_button(zone_key, subzone_key, row, kill_disabled)
 
-    def _add_kill_button(
-        self, zone_key: str, subzone_key: str, label: str, row: int, disabled: bool
-    ) -> None:
+    def _add_kill_button(self, zone_key: str, subzone_key: str, row: int, disabled: bool) -> None:
         kill_button: discord.ui.Button = discord.ui.Button(
-            label=label,
+            emoji=strings.KILL_BUTTON_EMOJI,
             style=discord.ButtonStyle.danger,
             custom_id=kill_custom_id_for(zone_key, subzone_key),
             row=row,

@@ -135,7 +135,7 @@ def found_confirmed(subzone_display_name: str) -> str:
     return f"Marked **{subzone_display_name}** as found — announcement posted."
 
 
-KILL_BUTTON_LABEL = "Elite killed"
+KILL_BUTTON_EMOJI = "\U0001f480"  # 💀
 
 
 def scouting_kill_note(subzone_display_name: str | None) -> str:
