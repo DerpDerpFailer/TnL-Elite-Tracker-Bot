@@ -96,6 +96,14 @@ class Storage:
                     subzones.setdefault(subzone_key, build_subzone_state(subzone_name))
             version = 3
 
+        if version < 4:
+            # v4 dropped the 7-minute spawn window: window_start becomes the
+            # single spawn_at timestamp and window_end is discarded.
+            for zone in self.data["zones"].values():
+                zone["spawn_at"] = zone.pop("window_start", None)
+                zone.pop("window_end", None)
+            version = 4
+
         if version != SCHEMA_VERSION:
             logger.warning(
                 "Data file version %s does not match expected %s after migrations; using as-is",

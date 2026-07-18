@@ -15,8 +15,8 @@ from bot.models import ZonePhase
 # ---------------------------------------------------------------------------
 
 PHASE_EMOJI: dict[ZonePhase, str] = {
-    ZonePhase.ACTIVE: "\U0001f7e2",  # 🟢 spawn window is currently open
-    ZonePhase.IMMINENT: "\U0001f7e1",  # 🟡 window opens in under 30 minutes
+    ZonePhase.ACTIVE: "\U0001f7e2",  # 🟢 spawn time has passed, no kill logged since
+    ZonePhase.IMMINENT: "\U0001f7e1",  # 🟡 spawn expected in under 30 minutes
     ZonePhase.WAITING: "⚪",  # ⚪ waiting for cooldown to elapse
     ZonePhase.NO_DATA: "❓",  # ❓ no kill has ever been recorded
 }
@@ -51,11 +51,11 @@ def zone_field_value_no_data(cooldown_minutes: int) -> str:
     )
 
 
-def zone_field_value(last_kill_ts: int, window_start_ts: int, cooldown_minutes: int) -> str:
+def zone_field_value(last_kill_ts: int, spawn_at_ts: int, cooldown_minutes: int) -> str:
     return (
-        f"Respawning: <t:{window_start_ts}:R>\n"
+        f"Respawning: <t:{spawn_at_ts}:R>\n"
         f"Last killed: <t:{last_kill_ts}:F> (<t:{last_kill_ts}:R>)\n"
-        f"Spawn time: <t:{window_start_ts}:F>\n"
+        f"Spawn time: <t:{spawn_at_ts}:F>\n"
         f"Cooldown: {_format_duration_words(cooldown_minutes)}"
     )
 
@@ -70,10 +70,10 @@ MAP_REMINDER_NOTE = (
 )
 
 
-def pre_alert_description(window_start_ts: int, window_end_ts: int, offset_minutes: int) -> str:
+def pre_alert_description(spawn_at_ts: int, offset_minutes: int) -> str:
     return (
-        f"Spawn window opens in about {offset_minutes} minutes: "
-        f"<t:{window_start_ts}:t> → <t:{window_end_ts}:t> (<t:{window_start_ts}:R>)"
+        f"Spawn expected in about {offset_minutes} minutes: "
+        f"<t:{spawn_at_ts}:t> (<t:{spawn_at_ts}:R>)"
     )
 
 
@@ -99,14 +99,11 @@ def scout_cancelled(subzone_display_name: str) -> str:
 
 
 def start_alert_title(display_name: str) -> str:
-    return f"\U0001f6a8 {display_name} spawn window is OPEN"
+    return f"\U0001f6a8 {display_name} spawn time has arrived"
 
 
-def start_alert_description(window_start_ts: int, window_end_ts: int) -> str:
-    return (
-        f"Spawn possible **now** (7-minute window): "
-        f"<t:{window_start_ts}:t> → <t:{window_end_ts}:t>"
-    )
+def start_alert_description(spawn_at_ts: int) -> str:
+    return f"Spawn possible **now**: <t:{spawn_at_ts}:t> (<t:{spawn_at_ts}:R>)"
 
 
 KILL_BUTTON_LABEL = "Elite killed"
@@ -121,10 +118,10 @@ def kill_button_confirmed_label(user_name: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def killed_confirmation(display_name: str, window_start_ts: int, window_end_ts: int) -> str:
+def killed_confirmation(display_name: str, spawn_at_ts: int) -> str:
     return (
-        f"Recorded kill for **{display_name}**. Next window: "
-        f"<t:{window_start_ts}:t> → <t:{window_end_ts}:t> (<t:{window_start_ts}:R>)."
+        f"Recorded kill for **{display_name}**. Next spawn: "
+        f"<t:{spawn_at_ts}:t> (<t:{spawn_at_ts}:R>)."
     )
 
 
@@ -140,13 +137,13 @@ def killed_invalid_time(raw: str) -> str:
 
 
 def noshow_no_window(display_name: str) -> str:
-    return f"**{display_name}** has no active window to report as a no-show yet. Log a kill first."
+    return f"**{display_name}** has no pending spawn time to report as a no-show yet. Log a kill first."
 
 
-def noshow_confirmation(display_name: str, window_start_ts: int, window_end_ts: int) -> str:
+def noshow_confirmation(display_name: str, spawn_at_ts: int) -> str:
     return (
-        f"No-show recorded for **{display_name}**. Timer pushed back — new window: "
-        f"<t:{window_start_ts}:t> → <t:{window_end_ts}:t> (<t:{window_start_ts}:R>)."
+        f"No-show recorded for **{display_name}**. Timer pushed back — new spawn time: "
+        f"<t:{spawn_at_ts}:t> (<t:{spawn_at_ts}:R>)."
     )
 
 
@@ -174,10 +171,10 @@ def status_row_no_data(display_name: str) -> str:
     return f"**{display_name}**: no kill recorded yet"
 
 
-def status_row(display_name: str, last_kill_ts: int, window_start_ts: int, window_end_ts: int, reported_by: str) -> str:
+def status_row(display_name: str, last_kill_ts: int, spawn_at_ts: int, reported_by: str) -> str:
     return (
         f"**{display_name}**: last kill <t:{last_kill_ts}:R> by {reported_by} | "
-        f"next window <t:{window_start_ts}:t> → <t:{window_end_ts}:t>"
+        f"next spawn <t:{spawn_at_ts}:t> (<t:{spawn_at_ts}:R>)"
     )
 
 

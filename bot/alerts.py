@@ -1,6 +1,6 @@
-"""Background task: checks every zone's window every 30s and fires the
-pre-alert / spawn-window-open alert exactly once each, persisting the
-one-shot flags so a restart never re-sends an alert that already went out.
+"""Background task: checks every zone's spawn timer every 30s and fires the
+pre-alert / spawn alert exactly once each, persisting the one-shot flags so a
+restart never re-sends an alert that already went out.
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ class AlertManager:
 
         @tasks.loop(seconds=30)
         async def loop() -> None:
-            await self.check_windows(bot)
+            await self.check_spawns(bot)
 
         @loop.before_loop
         async def before() -> None:
@@ -46,7 +46,7 @@ class AlertManager:
         if self._loop is not None:
             self._loop.cancel()
 
-    async def check_windows(self, bot: discord.Client) -> None:
+    async def check_spawns(self, bot: discord.Client) -> None:
         now = time.time()
         config = self.storage.data["config"]
         channel_id = config["alert_channel_id"] or config["channel_id"]
@@ -57,11 +57,11 @@ class AlertManager:
             due: list[tuple[str, str]] = []
             offset_seconds = config["alert_offset_minutes"] * 60
             for key, zone in self.storage.data["zones"].items():
-                if zone["window_start"] is None:
+                if zone["spawn_at"] is None:
                     continue
-                if not zone["pre_alert_sent"] and now >= zone["window_start"] - offset_seconds:
+                if not zone["pre_alert_sent"] and now >= zone["spawn_at"] - offset_seconds:
                     due.append((key, "pre"))
-                if not zone["start_alert_sent"] and now >= zone["window_start"]:
+                if not zone["start_alert_sent"] and now >= zone["spawn_at"]:
                     due.append((key, "start"))
 
             if not due:
@@ -97,8 +97,7 @@ class AlertManager:
         kind: str,
         role_mention: str | None,
     ) -> bool:
-        window_start = int(zone["window_start"])
-        window_end = int(zone["window_end"])
+        spawn_at = int(zone["spawn_at"])
 
         map_path = MAPS_DIR / f"{zone_key}.png"
         file = discord.File(map_path, filename=f"{zone_key}.png") if map_path.exists() else None
@@ -109,7 +108,7 @@ class AlertManager:
         else:
             embed = discord.Embed(color=discord.Color.red())
             embed.title = strings.start_alert_title(zone["display_name"])
-            embed.description = strings.start_alert_description(window_start, window_end)
+            embed.description = strings.start_alert_description(spawn_at)
             embed.add_field(name="​", value=strings.MAP_REMINDER_NOTE, inline=False)
             if file is not None:
                 embed.set_image(url=f"attachment://{zone_key}.png")

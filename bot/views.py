@@ -80,9 +80,7 @@ class KillButtonView(discord.ui.View):
         except discord.HTTPException as exc:
             logger.warning("Failed to disable kill button for %s: %s", self.zone_key, exc)
 
-        confirmation = strings.killed_confirmation(
-            display_name, int(zone_state["window_start"]), int(zone_state["window_end"])
-        )
+        confirmation = strings.killed_confirmation(display_name, int(zone_state["spawn_at"]))
         if interaction.response.is_done():
             await interaction.followup.send(confirmation, ephemeral=True)
         else:

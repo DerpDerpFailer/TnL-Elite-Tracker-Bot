@@ -2,8 +2,8 @@
 
 A single-guild Discord bot that tracks Elite PvP boss respawn timers for
 **Throne and Liberty**. Members log kills and no-shows, the bot computes the
-next 7-minute spawn window per zone, keeps a live status embed up to date, and
-posts pre-spawn / spawn-open alerts with the zone's map attached.
+next expected spawn time per zone, keeps a live status embed up to date, and
+posts pre-spawn / spawn-time alerts with the zone's map attached.
 
 State is a single JSON file (`/data/elite.json`), written atomically with a
 `.bak` copy kept on every write — there is no database.
@@ -22,19 +22,19 @@ State is a single JSON file (`/data/elite.json`), written atomically with a
 ## How it works
 
 - Each zone has a configurable cooldown. After a kill is logged, the boss is
-  expected to respawn somewhere in a **7-minute window** starting `cooldown`
-  after the kill, at one of several possible **sub-zones** within the region.
+  expected to respawn at exactly `cooldown` after the kill, at one of several
+  possible **sub-zones** within the region.
 - A single embed message (the "perpetual message") in a configured channel
   shows live status for every zone, using Discord's native `<t:...>`
   timestamps so each member sees times in their own timezone.
 - A background task checks every 30 seconds whether a pre-alert or
-  window-open alert is due for any zone, and sends it (with the zone's map
-  image attached, if one was uploaded) exactly once per window.
+  spawn-time alert is due for any zone, and sends it (with the zone's map
+  image attached, if one was uploaded) exactly once per spawn.
 - The pre-alert includes one **"Scouting `<sub-zone>`" button per sub-zone**:
   clicking toggles that member in/out of the sub-zone's scout list, and the
   embed updates live for everyone with who's checking each spot (plus that
   sub-zone's own map image, sent ephemerally, if one was uploaded).
-- The window-open alert includes an **"Elite killed" button**: anyone can
+- The spawn-time alert includes an **"Elite killed" button**: anyone can
   click it to log the kill on the spot (equivalent to `/elite-killed` with no
   time argument) without typing a command. The button disables itself and
   shows who confirmed it once clicked.
@@ -180,9 +180,9 @@ repo is checked out into an ephemeral location).
 | Command | Description |
 |---|---|
 | `/elite-killed zone heure` | Report a kill. `zone` autocompletes; `heure` is optional (`HH:MM` for today, or `DD/MM HH:MM`), defaults to now. |
-| `/elite-noshow zone` | Report that the boss did not spawn in the expected window; pushes the timer back by one full cooldown. |
+| `/elite-noshow zone` | Report that the boss did not spawn at the expected time; pushes the timer back by one full cooldown. |
 | `/elite-undo zone` | Undo the last kill/no-show entry for that zone. |
-| `/elite-status` | Ephemeral table of every zone: last kill, next window, who reported it. |
+| `/elite-status` | Ephemeral table of every zone: last kill, next spawn time, who reported it. |
 | `/elite-stats zone` | Up to the last 10 observed kill-to-kill intervals and their average, flagged if it drifts >15 min from the configured cooldown. |
 
 Examples:
@@ -208,15 +208,15 @@ finer-grained control.
 |---|---|
 | `/elite-config cooldown zone duree` | Set a zone's cooldown, e.g. `4h`, `5h30`, `90m`. |
 | `/elite-config channel canal` | Set the channel for the perpetual status embed. |
-| `/elite-config alert-channel canal` | Set a separate channel for spawn alerts (pre-alert + window-open); omit to send alerts in the status channel instead. |
+| `/elite-config alert-channel canal` | Set a separate channel for spawn alerts (pre-alert + spawn-time); omit to send alerts in the status channel instead. |
 | `/elite-config alert-role role` | Role pinged in alerts; omit to clear (no ping). |
 | `/elite-config admin-role role` | Role allowed to use `/elite-config`, in addition to Manage Server; omit to clear. |
-| `/elite-config alert-offset minutes` | Pre-alert delay before a window opens (default 15). |
+| `/elite-config alert-offset minutes` | Pre-alert delay before the spawn time (default 15). |
 | `/elite-config timezone tz` | IANA timezone used to interpret manual kill times, e.g. `Europe/Paris`. |
 | `/elite-config map zone image` | Upload/replace a zone's region-level map (PNG/JPG), attached to alerts. |
 | `/elite-config zone-add nom cooldown` | Add a new zone. |
 | `/elite-config zone-remove zone` | Remove a zone, its history, its sub-zones and their maps. |
-| `/elite-config zone-reset zone` | Clear a zone's last kill, current window and history — keeps its cooldown, map and configured sub-zones. Useful to wipe test data or fix a bad entry beyond what `/elite-undo` can revert (it only undoes one step). |
+| `/elite-config zone-reset zone` | Clear a zone's last kill, current spawn time and history — keeps its cooldown, map and configured sub-zones. Useful to wipe test data or fix a bad entry beyond what `/elite-undo` can revert (it only undoes one step). |
 | `/elite-config subzone-add zone nom` | Add a scouting sub-zone to a zone. |
 | `/elite-config subzone-remove zone subzone` | Remove a sub-zone (and its map) from a zone. |
 | `/elite-config submap zone subzone image` | Upload/replace the map image for one specific sub-zone, sent ephemerally to whoever clicks its "Scouting" button. |
@@ -273,7 +273,7 @@ Top-level JSON structure:
 
 ```jsonc
 {
-  "version": 3,
+  "version": 4,
   "config": {
     "channel_id": null,
     "alert_channel_id": null,
@@ -289,8 +289,7 @@ Top-level JSON structure:
       "cooldown_minutes": 240,
       "last_kill_at": null,
       "last_kill_by": null,
-      "window_start": null,
-      "window_end": null,
+      "spawn_at": null,
       "pre_alert_sent": false,
       "start_alert_sent": false,
       "subzones": {
@@ -310,9 +309,11 @@ Top-level JSON structure:
 }
 ```
 
-A sub-zone's `scouts` list holds the Discord user IDs currently scouting it
-for the pending window; it's cleared automatically whenever a new kill or
-no-show recalculates that window.
+`spawn_at` is the single expected respawn timestamp (`last_kill_at` +
+cooldown) — there's no window around it, the boss is simply expected right
+then. A sub-zone's `scouts` list holds the Discord user IDs currently
+scouting it for that pending spawn; it's cleared automatically whenever a
+new kill or no-show recalculates `spawn_at`.
 
 Map images live alongside it in the named Docker volume: region-level maps
 at `/data/maps/<zone>.png`, sub-zone maps at `/data/maps/<zone>__<subzone>.png`.

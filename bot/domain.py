@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from bot.constants import MAX_HISTORY_PER_ZONE, SPAWN_WINDOW_MINUTES
+from bot.constants import MAX_HISTORY_PER_ZONE
 from bot.models import (
     HistoryEntry,
     RootData,
@@ -58,13 +58,11 @@ def record_kill(
     _snapshot_for_undo(data, zone_key)
 
     zone = data["zones"][zone_key]
-    window_start = timestamp + zone["cooldown_minutes"] * 60
-    window_end = window_start + SPAWN_WINDOW_MINUTES * 60
+    spawn_at = timestamp + zone["cooldown_minutes"] * 60
 
     zone["last_kill_at"] = timestamp
     zone["last_kill_by"] = user_name
-    zone["window_start"] = window_start
-    zone["window_end"] = window_end
+    zone["spawn_at"] = spawn_at
     zone["pre_alert_sent"] = False
     zone["start_alert_sent"] = False
     _clear_scouts(zone)
@@ -80,19 +78,15 @@ def record_kill(
 def record_noshow(
     data: RootData, zone_key: str, now: float, user_id: int, user_name: str
 ) -> ZoneState | None:
-    """Returns None if the zone has no active window to reschedule."""
+    """Returns None if the zone has no pending spawn time to reschedule."""
     zone = data["zones"][zone_key]
-    if zone["window_start"] is None:
+    if zone["spawn_at"] is None:
         return None
 
     _snapshot_for_undo(data, zone_key)
 
-    missed_window_start = zone["window_start"]
-    new_window_start = missed_window_start + zone["cooldown_minutes"] * 60
-    new_window_end = new_window_start + SPAWN_WINDOW_MINUTES * 60
-
-    zone["window_start"] = new_window_start
-    zone["window_end"] = new_window_end
+    missed_spawn_at = zone["spawn_at"]
+    zone["spawn_at"] = missed_spawn_at + zone["cooldown_minutes"] * 60
     zone["pre_alert_sent"] = False
     zone["start_alert_sent"] = False
     _clear_scouts(zone)

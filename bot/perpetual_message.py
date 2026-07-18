@@ -39,7 +39,7 @@ def build_status_embed(storage: Storage, now: float) -> discord.Embed:
         else:
             field_value = strings.zone_field_value(
                 int(zone["last_kill_at"]),
-                int(zone["window_start"]),
+                int(zone["spawn_at"]),
                 zone["cooldown_minutes"],
             )
         embed.add_field(name=field_name, value=field_value, inline=False)

@@ -57,18 +57,14 @@ class MemberCommands(commands.Cog):
             await storage.save()
 
         await interaction.response.send_message(
-            strings.killed_confirmation(
-                zone_state["display_name"],
-                int(zone_state["window_start"]),
-                int(zone_state["window_end"]),
-            ),
+            strings.killed_confirmation(zone_state["display_name"], int(zone_state["spawn_at"])),
             ephemeral=True,
         )
         await self.bot.perpetual.force_update(self.bot, time.time())
 
     @app_commands.command(
         name="elite-noshow",
-        description="Report that the boss did NOT spawn during its expected window",
+        description="Report that the boss did NOT spawn at its expected time",
     )
     @app_commands.describe(zone="Zone that no-showed")
     @app_commands.autocomplete(zone=zone_autocomplete)
@@ -91,11 +87,7 @@ class MemberCommands(commands.Cog):
             await storage.save()
 
         await interaction.response.send_message(
-            strings.noshow_confirmation(
-                zone_state["display_name"],
-                int(zone_state["window_start"]),
-                int(zone_state["window_end"]),
-            ),
+            strings.noshow_confirmation(zone_state["display_name"], int(zone_state["spawn_at"])),
             ephemeral=True,
         )
         await self.bot.perpetual.force_update(self.bot, time.time())
@@ -141,8 +133,7 @@ class MemberCommands(commands.Cog):
                     strings.status_row(
                         zone["display_name"],
                         int(zone["last_kill_at"]),
-                        int(zone["window_start"]),
-                        int(zone["window_end"]),
+                        int(zone["spawn_at"]),
                         reported_by,
                     )
                 )

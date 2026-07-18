@@ -35,11 +35,10 @@ def build_scouting_embed(storage: Storage, zone_key: str) -> discord.Embed:
 
     embed = discord.Embed(title=strings.scouting_title(zone["display_name"]), color=discord.Color.blue())
 
-    window_start = zone["window_start"]
-    window_end = zone["window_end"]
-    if window_start is not None and window_end is not None:
+    spawn_at = zone["spawn_at"]
+    if spawn_at is not None:
         embed.description = strings.pre_alert_description(
-            int(window_start), int(window_end), config["alert_offset_minutes"]
+            int(spawn_at), config["alert_offset_minutes"]
         )
 
     for subzone in zone["subzones"].values():

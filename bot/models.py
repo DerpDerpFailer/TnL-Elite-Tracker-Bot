@@ -32,8 +32,7 @@ class ZoneState(TypedDict):
     cooldown_minutes: int
     last_kill_at: float | None
     last_kill_by: str | None
-    window_start: float | None
-    window_end: float | None
+    spawn_at: float | None
     pre_alert_sent: bool
     start_alert_sent: bool
     subzones: dict[str, SubzoneState]
@@ -83,8 +82,7 @@ def build_zone_state(
         cooldown_minutes=cooldown_minutes,
         last_kill_at=None,
         last_kill_by=None,
-        window_start=None,
-        window_end=None,
+        spawn_at=None,
         pre_alert_sent=False,
         start_alert_sent=False,
         subzones={
@@ -121,11 +119,11 @@ def build_seed_data() -> RootData:
 
 
 def zone_phase(zone: ZoneState, now: float, imminent_threshold_minutes: int) -> ZonePhase:
-    if zone["window_start"] is None or zone["window_end"] is None:
+    if zone["spawn_at"] is None:
         return ZonePhase.NO_DATA
-    if zone["window_start"] <= now <= zone["window_end"]:
+    seconds_until = zone["spawn_at"] - now
+    if seconds_until <= 0:
         return ZonePhase.ACTIVE
-    seconds_until = zone["window_start"] - now
-    if 0 < seconds_until <= imminent_threshold_minutes * 60:
+    if seconds_until <= imminent_threshold_minutes * 60:
         return ZonePhase.IMMINENT
     return ZonePhase.WAITING

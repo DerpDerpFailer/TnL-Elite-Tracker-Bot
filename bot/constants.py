@@ -4,14 +4,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Final, TypedDict
 
-SCHEMA_VERSION: Final[int] = 3
+SCHEMA_VERSION: Final[int] = 4
 
 DATA_DIR: Final[Path] = Path("/data")
 DATA_FILE: Final[Path] = DATA_DIR / "elite.json"
 BACKUP_FILE: Final[Path] = DATA_DIR / "elite.json.bak"
 MAPS_DIR: Final[Path] = DATA_DIR / "maps"
 
-SPAWN_WINDOW_MINUTES: Final[int] = 7
 DEFAULT_ALERT_OFFSET_MINUTES: Final[int] = 15
 DEFAULT_TIMEZONE: Final[str] = "Europe/Paris"
 
