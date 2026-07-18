@@ -36,7 +36,7 @@ class MemberCommands(commands.Cog):
         self, interaction: discord.Interaction, zone: str, heure: str | None = None
     ) -> None:
         storage = self.bot.storage
-        async with storage.lock:
+        async with storage.zone_lock(zone):
             if zone not in storage.data["zones"]:
                 await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
                 return
@@ -69,7 +69,7 @@ class MemberCommands(commands.Cog):
     @app_commands.autocomplete(zone=zone_autocomplete)
     async def elite_noshow(self, interaction: discord.Interaction, zone: str) -> None:
         storage = self.bot.storage
-        async with storage.lock:
+        async with storage.zone_lock(zone):
             if zone not in storage.data["zones"]:
                 await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
                 return
@@ -96,7 +96,7 @@ class MemberCommands(commands.Cog):
     @app_commands.autocomplete(zone=zone_autocomplete)
     async def elite_undo(self, interaction: discord.Interaction, zone: str) -> None:
         storage = self.bot.storage
-        async with storage.lock:
+        async with storage.zone_lock(zone):
             if zone not in storage.data["zones"]:
                 await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
                 return

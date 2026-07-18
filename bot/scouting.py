@@ -194,7 +194,7 @@ async def record_kill_and_close_scouting(
     button. Returns None if the zone/sub-zone no longer exists (e.g. removed
     by an admin mid-cycle)."""
     storage = bot.storage
-    async with storage.lock:
+    async with storage.zone_lock(zone_key):
         zone = storage.data["zones"].get(zone_key)
         has_subzone = subzone_key != NO_SUBZONE_KEY
         if zone is None or (has_subzone and subzone_key not in zone["subzones"]):
@@ -316,7 +316,7 @@ class ScoutingView(discord.ui.View):
 
     async def _on_scout_click(self, interaction: discord.Interaction, subzone_key: str) -> None:
         storage = self.bot.storage
-        async with storage.lock:
+        async with storage.zone_lock(self.zone_key):
             zone = storage.data["zones"].get(self.zone_key)
             if zone is None or subzone_key not in zone["subzones"]:
                 await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
@@ -376,7 +376,7 @@ class ScoutingView(discord.ui.View):
 
     async def _on_found_click(self, interaction: discord.Interaction, subzone_key: str) -> None:
         storage = self.bot.storage
-        async with storage.lock:
+        async with storage.zone_lock(self.zone_key):
             zone = storage.data["zones"].get(self.zone_key)
             if zone is None or subzone_key not in zone["subzones"]:
                 await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
@@ -549,7 +549,7 @@ class FoundAnnouncementView(discord.ui.View):
 
     async def _on_undo_click(self, interaction: discord.Interaction) -> None:
         storage = self.bot.storage
-        async with storage.lock:
+        async with storage.zone_lock(self.zone_key):
             zone = storage.data["zones"].get(self.zone_key)
             if zone is None:
                 await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)

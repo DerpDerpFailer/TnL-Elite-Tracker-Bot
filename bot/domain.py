@@ -2,7 +2,9 @@
 
 These functions know nothing about Discord — they operate on the plain dicts
 that make up the JSON document. Callers (cogs, alert loop) are responsible for
-holding `storage.lock` around a mutate-then-`storage.save()` sequence.
+holding the relevant lock (`storage.lock` for structural/config changes,
+`storage.zone_lock(key)` for anything scoped to one zone) around a
+mutate-then-`storage.save()` sequence.
 """
 from __future__ import annotations
 

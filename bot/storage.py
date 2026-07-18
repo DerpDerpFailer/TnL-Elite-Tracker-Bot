@@ -5,9 +5,19 @@ temp file in the same directory, fsynced, and swapped in with os.replace so a
 crash mid-write can never leave a truncated/corrupt elite.json. The previous
 version is copied to elite.json.bak before each swap.
 
-`Storage.lock` is a single asyncio.Lock shared by every command and background
-task that mutates `Storage.data`; callers acquire it, mutate `self.data`, then
-call `await storage.save()` (which does not itself acquire the lock).
+Locking is split by scope: `Storage.lock` guards structural/config changes
+that aren't tied to one zone (adding/removing a zone, `/elite-config`
+settings), while `Storage.zone_lock(key)` returns a lock scoped to a single
+zone, used by everything that reads/mutates just that zone's state (kill,
+no-show, undo, scouting/found/kill buttons, spawn alerts). Callers acquire
+the appropriate lock, mutate `self.data`, then call `await storage.save()`
+(which does not itself require the caller to hold any particular lock — the
+actual file write is separately serialized internally, since it touches the
+whole document regardless of which zone changed).
+
+Per-zone locks mean a slow sequence of Discord API calls for one zone (e.g.
+deleting several scouting messages after a kill) never blocks a command or
+button click for an unrelated zone.
 """
 from __future__ import annotations
 
@@ -33,7 +43,19 @@ class Storage:
         self.path = path
         self.backup_path = backup_path
         self.lock = asyncio.Lock()
+        self._zone_locks: dict[str, asyncio.Lock] = {}
+        self._write_lock = asyncio.Lock()
         self.data: RootData = build_seed_data()
+
+    def zone_lock(self, zone_key: str) -> asyncio.Lock:
+        """Lock scoped to a single zone's kill/scout/found/undo/alert flow.
+        Created lazily and kept for the process lifetime — the number of
+        zones is small and bounded, so there's no meaningful growth."""
+        lock = self._zone_locks.get(zone_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._zone_locks[zone_key] = lock
+        return lock
 
     def load_or_seed(self) -> None:
         """Synchronous startup load. Must run before the bot logs in."""
@@ -170,8 +192,13 @@ class Storage:
         self.data["version"] = SCHEMA_VERSION
 
     async def save(self) -> None:
-        """Persist `self.data`. Caller must already hold `self.lock`."""
-        await asyncio.to_thread(self._write_sync)
+        """Persist `self.data`. Caller must already hold whichever of
+        `self.lock` / `self.zone_lock(...)` guards the mutation being saved.
+        The file write itself is serialized separately (it dumps the whole
+        document regardless of which zone changed), so concurrent saves for
+        different zones can never race on disk."""
+        async with self._write_lock:
+            await asyncio.to_thread(self._write_sync)
 
     def _write_sync(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

@@ -58,43 +58,52 @@ class AlertManager:
         if channel_id is None:
             return
 
-        async with self.storage.lock:
-            due: list[tuple[str, str]] = []
-            offset_seconds = config["alert_offset_minutes"] * 60
-            for key, zone in self.storage.data["zones"].items():
-                if zone["spawn_at"] is None:
-                    continue
-                if not zone["pre_alert_sent"] and now >= zone["spawn_at"] - offset_seconds:
-                    due.append((key, "pre"))
-                if not zone["spawn_due_marked"] and now >= zone["spawn_at"]:
-                    due.append((key, "spawn_due"))
+        # Scanning for due zones touches no network/lock — this loop has no
+        # `await`, so it's already atomic with respect to other coroutines
+        # and doesn't need to be inside any lock.
+        due: list[tuple[str, str]] = []
+        offset_seconds = config["alert_offset_minutes"] * 60
+        for key, zone in self.storage.data["zones"].items():
+            if zone["spawn_at"] is None:
+                continue
+            if not zone["pre_alert_sent"] and now >= zone["spawn_at"] - offset_seconds:
+                due.append((key, "pre"))
+            if not zone["spawn_due_marked"] and now >= zone["spawn_at"]:
+                due.append((key, "spawn_due"))
 
-            if not due:
+        if not due:
+            return
+
+        channel = bot.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await bot.fetch_channel(channel_id)
+            except discord.HTTPException:
+                logger.warning(strings.LOG_CHANNEL_MISSING, channel_id)
                 return
 
-            channel = bot.get_channel(channel_id)
-            if channel is None:
-                try:
-                    channel = await bot.fetch_channel(channel_id)
-                except discord.HTTPException:
-                    logger.warning(strings.LOG_CHANNEL_MISSING, channel_id)
-                    return
+        role_id = config["alert_role_id"]
+        role_mention = f"<@&{role_id}>" if role_id else None
 
-            role_id = config["alert_role_id"]
-            role_mention = f"<@&{role_id}>" if role_id else None
-
-            sent_any = False
-            for key, kind in due:
-                zone = self.storage.data["zones"][key]
+        # Each zone is processed under its own lock (mutate + save + the
+        # network calls for that zone), so one zone's alert never blocks a
+        # command or button click for another zone.
+        sent_any = False
+        for key, kind in due:
+            async with self.storage.zone_lock(key):
+                zone = self.storage.data["zones"].get(key)
+                if zone is None:
+                    continue  # removed mid-cycle by an admin
                 if kind == "pre":
                     sent = await self._send_pre_alert(bot, channel, key, zone, role_mention)
                 else:
                     sent = await self._mark_spawn_due(bot, key, zone)
+                if sent:
+                    await self.storage.save()
                 sent_any = sent_any or sent
 
-            if sent_any:
-                self.perpetual.mark_dirty()
-                await self.storage.save()
+        if sent_any:
+            self.perpetual.mark_dirty()
 
     async def _send_pre_alert(
         self,

@@ -60,7 +60,7 @@ class AdminConfigGroup(app_commands.Group):
     @app_commands.autocomplete(zone=zone_autocomplete)
     async def cooldown(self, interaction: discord.Interaction, zone: str, duree: str) -> None:
         storage = self.bot.storage
-        async with storage.lock:
+        async with storage.zone_lock(zone):
             if zone not in storage.data["zones"]:
                 await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
                 return
@@ -277,7 +277,7 @@ class AdminConfigGroup(app_commands.Group):
     @app_commands.autocomplete(zone=zone_autocomplete)
     async def zone_reset(self, interaction: discord.Interaction, zone: str) -> None:
         storage = self.bot.storage
-        async with storage.lock:
+        async with storage.zone_lock(zone):
             if zone not in storage.data["zones"]:
                 await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
                 return
@@ -296,7 +296,7 @@ class AdminConfigGroup(app_commands.Group):
     @app_commands.autocomplete(zone=zone_autocomplete)
     async def subzone_add(self, interaction: discord.Interaction, zone: str, nom: str) -> None:
         storage = self.bot.storage
-        async with storage.lock:
+        async with storage.zone_lock(zone):
             if zone not in storage.data["zones"]:
                 await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
                 return
@@ -326,7 +326,7 @@ class AdminConfigGroup(app_commands.Group):
         self, interaction: discord.Interaction, zone: str, subzone: str
     ) -> None:
         storage = self.bot.storage
-        async with storage.lock:
+        async with storage.zone_lock(zone):
             if zone not in storage.data["zones"]:
                 await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
                 return

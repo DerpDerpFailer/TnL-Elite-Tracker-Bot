@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 from bot.constants import SCHEMA_VERSION
@@ -163,3 +164,57 @@ def test_migration_preserves_existing_pending_kill_state(tmp_path):
     assert nix["scouting_messages"] == [
         {"channel_id": 999, "message_id": 1001, "subzone_keys": ["frozen-nightlands"]}
     ]
+
+
+class TestZoneLock:
+    def test_same_key_returns_the_same_lock(self, storage):
+        assert storage.zone_lock("laslan") is storage.zone_lock("laslan")
+
+    def test_different_keys_return_different_locks(self, storage):
+        assert storage.zone_lock("laslan") is not storage.zone_lock("nix")
+
+    async def test_locking_one_zone_does_not_block_another(self, storage):
+        # A slow holder of laslan's lock must not delay a concurrent
+        # acquisition of nix's lock — this is the whole point of splitting
+        # the single global storage.lock into per-zone locks.
+        events: list[str] = []
+
+        async def hold_laslan():
+            async with storage.zone_lock("laslan"):
+                events.append("laslan:acquired")
+                await asyncio.sleep(0.05)
+                events.append("laslan:released")
+
+        async def touch_nix():
+            await asyncio.sleep(0.01)  # start after laslan has the lock
+            async with storage.zone_lock("nix"):
+                events.append("nix:acquired")
+                events.append("nix:released")
+
+        await asyncio.gather(hold_laslan(), touch_nix())
+
+        # nix's whole critical section completes while laslan's is still
+        # held, proving the two locks are independent.
+        assert events.index("nix:released") < events.index("laslan:released")
+
+    async def test_locking_same_zone_twice_is_serialized(self, storage):
+        events: list[str] = []
+
+        async def first():
+            async with storage.zone_lock("laslan"):
+                events.append("first:acquired")
+                await asyncio.sleep(0.05)
+                events.append("first:released")
+
+        async def second():
+            await asyncio.sleep(0.01)
+            async with storage.zone_lock("laslan"):
+                events.append("second:acquired")
+
+        await asyncio.gather(first(), second())
+
+        assert events == [
+            "first:acquired",
+            "first:released",
+            "second:acquired",
+        ]
