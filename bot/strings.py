@@ -135,6 +135,13 @@ def found_confirmed(subzone_display_name: str) -> str:
     return f"Marked **{subzone_display_name}** as found — announcement posted."
 
 
+UNDO_BUTTON_EMOJI = "\U0001f504"  # 🔄
+
+
+def found_undone(zone_display_name: str) -> str:
+    return f"Undid the Elite Found report for **{zone_display_name}** — scouting re-enabled."
+
+
 KILL_BUTTON_EMOJI = "\U0001f480"  # 💀
 
 

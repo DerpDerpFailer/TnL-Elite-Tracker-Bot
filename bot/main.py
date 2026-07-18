@@ -14,7 +14,7 @@ from bot import strings
 from bot.alerts import AlertManager
 from bot.config import load_env_config
 from bot.perpetual_message import PerpetualMessageManager
-from bot.scouting import ScoutingView, chunk_subzone_keys
+from bot.scouting import FoundAnnouncementView, ScoutingView, chunk_subzone_keys
 from bot.storage import Storage
 
 logger = logging.getLogger(__name__)
@@ -47,11 +47,16 @@ class EliteBot(commands.Bot):
         # restart keep routing correctly regardless of which phase they're
         # in. A zero-sub-zone zone still gets one registration for its
         # generic (no-sub-zone) kill button.
+        # Also re-register one persistent FoundAnnouncementView per known
+        # sub-zone, covering the 💀/🔄 buttons on any Elite Found
+        # announcement still sitting unresolved from before this restart.
         for zone_key, zone in self.storage.data["zones"].items():
             chunks = chunk_subzone_keys(zone) or [[]]
             for chunk in chunks:
                 self.add_view(ScoutingView(self, zone_key, chunk))
                 self.add_view(ScoutingView(self, zone_key, chunk, show_kill_button=True))
+            for subzone_key in zone["subzones"]:
+                self.add_view(FoundAnnouncementView(self, zone_key, subzone_key))
 
         for extension in EXTENSIONS:
             await self.load_extension(extension)

@@ -41,8 +41,11 @@ State is a single JSON file (`/data/elite.json`), written atomically with a
   zone (across every message it spans) since there's no more need to keep
   scouting once it's found, marks the shared embed's title "... Scouting -
   Done" with a bold "Elite found at `<sub-zone>`" note, and posts a new
-  pinged announcement embed with that sub-zone's map attached if one was
-  uploaded.
+  pinged announcement embed (with that sub-zone's map attached if one was
+  uploaded) that carries two buttons of its own: 💀 to report the kill right
+  there without scrolling back to the scouting message, and 🔄 to undo the
+  found report if it was a mistake — that re-enables 🔍/📍 on the scouting
+  message(s) and deletes the announcement.
 - Once the spawn time is reached, that same scouting message is edited
   in-place (title → "... Scouting — Spawn Due", no new message, no ping) to
   add a third button per row: a plain 💀 **"Elite killed"** button (icon

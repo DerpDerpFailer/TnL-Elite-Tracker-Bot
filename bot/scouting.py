@@ -1,25 +1,30 @@
-"""Discord UI for the scouting message's per-sub-zone buttons: "Scouting
-<name>", "Elite Found" and (once the spawn time arrives) "Elite killed".
+"""Discord UI for the scouting message's per-sub-zone buttons: "🔍 <name>",
+"📍" (Elite Found) and (once the spawn time arrives) "💀" (Elite killed) —
+plus the two buttons on the Elite Found announcement itself: "💀" (kill,
+duplicated there so it's not necessary to scroll back to the scouting
+message) and "🔄" (undo the found report).
 
 There is no separate "spawn has arrived" message anymore: when spawn_at is
 reached, the existing scouting message(s) are silently edited in place to add
-an "Elite killed" button on every sub-zone row (capturing which sub-zone the
-kill happened in), while "Scouting"/"Elite Found" stay active — the boss may
-not actually be found/killed exactly on schedule. Clicking "Elite Found"
-disables Scouting + Elite Found for the whole zone (across every message —
-finding isn't the same as killing, so "Elite killed" stays clickable) and
-posts a new pinged announcement. Clicking "Elite killed" disables everything
-for good and records the kill (optionally with its sub-zone).
+a 💀 button on every sub-zone row (capturing which sub-zone the kill happened
+in), while 🔍/📍 stay active — the boss may not actually be found/killed
+exactly on schedule. Clicking 📍 disables 🔍/📍 for the whole zone (across
+every message — finding isn't the same as killing, so 💀 stays clickable)
+and posts a new pinged announcement with its own 💀/🔄 buttons. Clicking 💀
+(from either place) disables everything for good and records the kill
+(optionally with its sub-zone); clicking 🔄 on the announcement instead
+reverts the found report: it re-enables 🔍/📍 on the scouting message(s) and
+deletes the announcement.
 
 Discord caps a message at 5 action rows, so with one sub-zone per row a zone
 can show at most 5 sub-zones per message; zones with more get their buttons
 spread across several messages. Only the first ("primary") message carries
 the embed. `zone["scouting_messages"]` tracks every message sent for the
 current cycle (channel/message id + which sub-zone keys it holds), which is
-what lets "Elite Found"/"Elite killed" reach and update every one of them,
-not just the one that was clicked. Every per-chunk view is persistent
-(`timeout=None`) and re-registered at startup via `bot.add_view(...)` so
-clicks keep working on old alert messages after a restart.
+what lets 📍/💀 reach and update every one of them, not just the one that was
+clicked. Every view here is persistent (`timeout=None`) and re-registered at
+startup via `bot.add_view(...)` so clicks keep working on old alert messages
+after a restart.
 """
 from __future__ import annotations
 
@@ -42,6 +47,8 @@ logger = logging.getLogger(__name__)
 _SCOUT_CUSTOM_ID_PREFIX = "elite:scout:"
 _FOUND_CUSTOM_ID_PREFIX = "elite:found:"
 _KILL_CUSTOM_ID_PREFIX = "elite:kill:"
+_FOUND_KILL_CUSTOM_ID_PREFIX = "elite:foundkill:"
+_FOUND_UNDO_CUSTOM_ID_PREFIX = "elite:foundundo:"
 NO_SUBZONE_KEY = "_none_"  # sentinel used for the kill button on zero-sub-zone zones
 MAX_ROWS_PER_MESSAGE = 5  # one sub-zone per row; Discord allows at most 5 action rows
 
@@ -56,6 +63,14 @@ def found_custom_id_for(zone_key: str, subzone_key: str) -> str:
 
 def kill_custom_id_for(zone_key: str, subzone_key: str) -> str:
     return f"{_KILL_CUSTOM_ID_PREFIX}{zone_key}:{subzone_key}"
+
+
+def found_kill_custom_id_for(zone_key: str, subzone_key: str) -> str:
+    return f"{_FOUND_KILL_CUSTOM_ID_PREFIX}{zone_key}:{subzone_key}"
+
+
+def found_undo_custom_id_for(zone_key: str, subzone_key: str) -> str:
+    return f"{_FOUND_UNDO_CUSTOM_ID_PREFIX}{zone_key}:{subzone_key}"
 
 
 def chunk_subzone_keys(zone: ZoneState, chunk_size: int = MAX_ROWS_PER_MESSAGE) -> list[list[str]]:
@@ -119,6 +134,77 @@ def build_elite_found_embed(
         embed.set_image(url=f"attachment://{subzone_key}.png")
 
     return embed, file
+
+
+async def _resolve_channel(bot: "EliteBot", channel_id: int) -> discord.abc.Messageable | None:
+    channel = bot.get_channel(channel_id)
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(channel_id)
+        except discord.HTTPException:
+            return None
+    return channel
+
+
+async def record_kill_and_close_scouting(
+    bot: "EliteBot", zone_key: str, subzone_key: str, user_id: int, user_name: str
+) -> ZoneState | None:
+    """Records the kill (optionally for a specific sub-zone) and disables
+    every scouting/found/kill button across every message tracked for the
+    zone's current cycle, marking the primary one done. Shared by the
+    scouting message's per-row kill button and the Elite Found
+    announcement's kill button. Returns None if the zone/sub-zone no longer
+    exists (e.g. removed by an admin mid-cycle)."""
+    storage = bot.storage
+    async with storage.lock:
+        zone = storage.data["zones"].get(zone_key)
+        has_subzone = subzone_key != NO_SUBZONE_KEY
+        if zone is None or (has_subzone and subzone_key not in zone["subzones"]):
+            return None
+
+        subzone_display_name = zone["subzones"][subzone_key]["display_name"] if has_subzone else None
+        refs = zone["scouting_messages"]
+
+        zone_state = domain.record_kill(
+            storage.data, zone_key, time.time(), user_id, user_name, subzone_display_name
+        )
+        await storage.save()
+
+        zone_display_name = zone_state["display_name"]
+        for index, ref in enumerate(refs):
+            channel = await _resolve_channel(bot, ref["channel_id"])
+            if channel is None:
+                logger.warning(
+                    "Channel %s could not be resolved, skipping scouting message update",
+                    ref["channel_id"],
+                )
+                continue
+            try:
+                message = await channel.fetch_message(ref["message_id"])
+                disabled_view = ScoutingView(
+                    bot,
+                    zone_key,
+                    ref["subzone_keys"],
+                    show_kill_button=True,
+                    scout_disabled=True,
+                    found_disabled=True,
+                    kill_disabled=True,
+                )
+                if index == 0:
+                    done_embed = build_scouting_embed(storage, zone_key)
+                    done_embed.title = strings.scouting_done_title(zone_display_name)
+                    done_embed.add_field(
+                        name="​",
+                        value=strings.scouting_kill_note(subzone_display_name),
+                        inline=False,
+                    )
+                    await message.edit(embed=done_embed, view=disabled_view)
+                else:
+                    await message.edit(view=disabled_view)
+            except discord.HTTPException as exc:
+                logger.warning("Failed to disable scouting buttons for %s: %s", zone_key, exc)
+
+    return zone_state
 
 
 class ScoutingView(discord.ui.View):
@@ -338,8 +424,13 @@ class ScoutingView(discord.ui.View):
                 found_embed, found_file = build_elite_found_embed(
                     storage, self.zone_key, subzone_key
                 )
+                found_view = FoundAnnouncementView(self.bot, self.zone_key, subzone_key)
                 try:
-                    send_kwargs: dict = {"content": role_mention, "embed": found_embed}
+                    send_kwargs: dict = {
+                        "content": role_mention,
+                        "embed": found_embed,
+                        "view": found_view,
+                    }
                     if found_file is not None:
                         send_kwargs["file"] = found_file
                     await announce_channel.send(**send_kwargs)
@@ -355,74 +446,22 @@ class ScoutingView(discord.ui.View):
             await interaction.response.send_message(confirmation, ephemeral=True)
 
     async def _on_kill_click(self, interaction: discord.Interaction, subzone_key: str) -> None:
-        storage = self.bot.storage
-        async with storage.lock:
-            zone = storage.data["zones"].get(self.zone_key)
-            has_subzone = subzone_key != NO_SUBZONE_KEY
-            if zone is None or (has_subzone and subzone_key not in zone["subzones"]):
-                await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
-                return
-
-            subzone_display_name = (
-                zone["subzones"][subzone_key]["display_name"] if has_subzone else None
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.HTTPException as exc:
+            logger.warning(
+                "Failed to acknowledge elite-killed click for %s: %s", self.zone_key, exc
             )
-            refs = zone["scouting_messages"]
 
-            try:
-                await interaction.response.defer(ephemeral=True)
-            except discord.HTTPException as exc:
-                logger.warning(
-                    "Failed to acknowledge elite-killed click for %s: %s", self.zone_key, exc
-                )
+        zone_state = await record_kill_and_close_scouting(
+            self.bot, self.zone_key, subzone_key, interaction.user.id, str(interaction.user)
+        )
+        if zone_state is None:
+            await interaction.followup.send(strings.ZONE_NOT_FOUND, ephemeral=True)
+            return
 
-            zone_state = domain.record_kill(
-                storage.data,
-                self.zone_key,
-                time.time(),
-                interaction.user.id,
-                str(interaction.user),
-                subzone_display_name,
-            )
-            await storage.save()
-
-            zone_display_name = zone_state["display_name"]
-
-            for index, ref in enumerate(refs):
-                try:
-                    channel = self.bot.get_channel(ref["channel_id"])
-                    if channel is None:
-                        channel = await self.bot.fetch_channel(ref["channel_id"])
-                    message = await channel.fetch_message(ref["message_id"])
-                    disabled_view = ScoutingView(
-                        self.bot,
-                        self.zone_key,
-                        ref["subzone_keys"],
-                        show_kill_button=True,
-                        scout_disabled=True,
-                        found_disabled=True,
-                        kill_disabled=True,
-                    )
-                    if index == 0:
-                        done_embed = build_scouting_embed(storage, self.zone_key)
-                        done_embed.title = strings.scouting_done_title(zone_display_name)
-                        done_embed.add_field(
-                            name="​",
-                            value=strings.scouting_kill_note(subzone_display_name),
-                            inline=False,
-                        )
-                        await message.edit(embed=done_embed, view=disabled_view)
-                    else:
-                        await message.edit(view=disabled_view)
-                except discord.HTTPException as exc:
-                    logger.warning(
-                        "Failed to disable scouting buttons for %s: %s", self.zone_key, exc
-                    )
-
-        confirmation = strings.killed_confirmation(zone_display_name, int(zone_state["spawn_at"]))
-        if interaction.response.is_done():
-            await interaction.followup.send(confirmation, ephemeral=True)
-        else:
-            await interaction.response.send_message(confirmation, ephemeral=True)
+        confirmation = strings.killed_confirmation(zone_state["display_name"], int(zone_state["spawn_at"]))
+        await interaction.followup.send(confirmation, ephemeral=True)
 
     async def _edit_message(self, ref: ScoutingMessageRef, **fields) -> None:
         try:
@@ -433,3 +472,114 @@ class ScoutingView(discord.ui.View):
             await message.edit(**fields)
         except discord.HTTPException as exc:
             logger.warning("Failed to update scouting message for %s: %s", self.zone_key, exc)
+
+
+class FoundAnnouncementView(discord.ui.View):
+    """The 💀/🔄 buttons attached to the Elite Found announcement message."""
+
+    def __init__(
+        self, bot: "EliteBot", zone_key: str, subzone_key: str, *, disabled: bool = False
+    ) -> None:
+        super().__init__(timeout=None)
+        self.bot = bot
+        self.zone_key = zone_key
+        self.subzone_key = subzone_key
+
+        kill_button: discord.ui.Button = discord.ui.Button(
+            emoji=strings.KILL_BUTTON_EMOJI,
+            style=discord.ButtonStyle.danger,
+            custom_id=found_kill_custom_id_for(zone_key, subzone_key),
+            row=0,
+            disabled=disabled,
+        )
+        kill_button.callback = self._on_kill_click
+        self.add_item(kill_button)
+
+        undo_button: discord.ui.Button = discord.ui.Button(
+            emoji=strings.UNDO_BUTTON_EMOJI,
+            style=discord.ButtonStyle.secondary,
+            custom_id=found_undo_custom_id_for(zone_key, subzone_key),
+            row=0,
+            disabled=disabled,
+        )
+        undo_button.callback = self._on_undo_click
+        self.add_item(undo_button)
+
+    async def _on_kill_click(self, interaction: discord.Interaction) -> None:
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.HTTPException as exc:
+            logger.warning(
+                "Failed to acknowledge elite-killed click for %s: %s", self.zone_key, exc
+            )
+
+        zone_state = await record_kill_and_close_scouting(
+            self.bot, self.zone_key, self.subzone_key, interaction.user.id, str(interaction.user)
+        )
+        if zone_state is None:
+            await interaction.followup.send(strings.ZONE_NOT_FOUND, ephemeral=True)
+            return
+
+        try:
+            disabled_view = FoundAnnouncementView(
+                self.bot, self.zone_key, self.subzone_key, disabled=True
+            )
+            await interaction.message.edit(view=disabled_view)
+        except discord.HTTPException as exc:
+            logger.warning(
+                "Failed to disable elite-found announcement buttons for %s: %s",
+                self.zone_key,
+                exc,
+            )
+
+        confirmation = strings.killed_confirmation(zone_state["display_name"], int(zone_state["spawn_at"]))
+        await interaction.followup.send(confirmation, ephemeral=True)
+
+    async def _on_undo_click(self, interaction: discord.Interaction) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            zone = storage.data["zones"].get(self.zone_key)
+            if zone is None:
+                await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+                return
+
+            zone_display_name = zone["display_name"]
+            spawn_due = zone["start_alert_sent"]
+            refs = zone["scouting_messages"]
+            zone["found_this_cycle"] = False
+            await storage.save()
+
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.HTTPException as exc:
+            logger.warning(
+                "Failed to acknowledge elite-found undo click for %s: %s", self.zone_key, exc
+            )
+
+        for index, ref in enumerate(refs):
+            try:
+                channel = self.bot.get_channel(ref["channel_id"])
+                if channel is None:
+                    channel = await self.bot.fetch_channel(ref["channel_id"])
+                message = await channel.fetch_message(ref["message_id"])
+                view = ScoutingView(
+                    self.bot, self.zone_key, ref["subzone_keys"], show_kill_button=spawn_due
+                )
+                if index == 0:
+                    embed = build_scouting_embed(storage, self.zone_key, spawn_due=spawn_due)
+                    await message.edit(embed=embed, view=view)
+                else:
+                    await message.edit(view=view)
+            except discord.HTTPException as exc:
+                logger.warning(
+                    "Failed to re-enable scouting buttons for %s: %s", self.zone_key, exc
+                )
+
+        try:
+            await interaction.message.delete()
+        except discord.HTTPException as exc:
+            logger.warning(
+                "Failed to delete elite-found announcement for %s: %s", self.zone_key, exc
+            )
+
+        await interaction.followup.send(strings.found_undone(zone_display_name), ephemeral=True)
