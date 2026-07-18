@@ -314,6 +314,15 @@ def config_zone_removed(display_name: str) -> str:
     return f"Zone **{display_name}** and its history have been removed."
 
 
+def config_sync_zones_added(display_names: list[str]) -> str:
+    joined = ", ".join(f"**{name}**" for name in display_names)
+    return f"Added missing default zone(s): {joined}."
+
+
+def config_sync_zones_up_to_date() -> str:
+    return "All built-in default zones are already present — nothing to add."
+
+
 def config_zone_reset(display_name: str) -> str:
     return (
         f"Zone **{display_name}** has been reset — last kill, current window and history "

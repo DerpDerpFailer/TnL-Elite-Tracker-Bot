@@ -253,6 +253,27 @@ class AdminConfigGroup(app_commands.Group):
         )
         await self.bot.perpetual.force_update(self.bot, time.time())
 
+    @app_commands.command(
+        name="sync-zones",
+        description="Add any built-in default zone (with its sub-zones) missing from this server",
+    )
+    async def sync_zones(self, interaction: discord.Interaction) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            added = domain.sync_default_zones(storage.data)
+            if added:
+                await storage.save()
+
+        if added:
+            await interaction.response.send_message(
+                strings.config_sync_zones_added(added), ephemeral=True
+            )
+            await self.bot.perpetual.force_update(self.bot, time.time())
+        else:
+            await interaction.response.send_message(
+                strings.config_sync_zones_up_to_date(), ephemeral=True
+            )
+
     @app_commands.command(name="zone-remove", description="Remove a tracked zone and its history")
     @app_commands.describe(zone="Zone to remove")
     @app_commands.autocomplete(zone=zone_autocomplete)

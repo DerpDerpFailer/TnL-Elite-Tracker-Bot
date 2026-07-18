@@ -223,6 +223,7 @@ finer-grained control.
 | `/elite-config timezone tz` | IANA timezone used to interpret manual kill times, e.g. `Europe/Paris`. |
 | `/elite-config map zone image` | Upload/replace a zone's region-level map (PNG/JPG), attached to alerts. |
 | `/elite-config zone-add nom cooldown` | Add a new zone. |
+| `/elite-config sync-zones` | Add any built-in default zone (Laslan/Stonegard/Syleus/Talandre/Nix + dungeons, with their sub-zones) that isn't already tracked on this server. Only adds missing zones — never touches ones that already exist, even if their cooldown differs from the default. Use this after an update adds new default zones/sub-zones to the code, since the seed only runs on a brand-new `/data/elite.json`. |
 | `/elite-config zone-remove zone` | Remove a zone, its history, its sub-zones and their maps. |
 | `/elite-config zone-reset zone` | Clear a zone's last kill, current spawn time and history — keeps its cooldown, map and configured sub-zones. Useful to wipe test data or fix a bad entry beyond what `/elite-undo` can revert (it only undoes one step). |
 | `/elite-config subzone-add zone nom` | Add a scouting sub-zone to a zone. |
@@ -244,6 +245,7 @@ Examples:
 /elite-config map zone:Nix image:nix-map.png
 /elite-config zone-add nom:Aldheim cooldown:5h
 /elite-config zone-remove zone:Aldheim
+/elite-config sync-zones
 /elite-config zone-reset zone:Laslan
 /elite-config subzone-add zone:Nix nom:Frostbite Ridge
 /elite-config subzone-remove zone:Nix subzone:Frostbite Ridge

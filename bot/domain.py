@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from bot.constants import MAX_HISTORY_PER_ZONE
+from bot.constants import DEFAULT_SUBZONES, DEFAULT_ZONES, MAX_HISTORY_PER_ZONE
 from bot.models import (
     HistoryEntry,
     RootData,
@@ -30,6 +30,7 @@ __all__ = [
     "remove_subzone",
     "toggle_scout",
     "kill_intervals_minutes",
+    "sync_default_zones",
 ]
 
 
@@ -110,9 +111,35 @@ def undo_last(data: RootData, zone_key: str) -> bool:
     return True
 
 
-def add_zone(data: RootData, zone_key: str, display_name: str, cooldown_minutes: int) -> None:
-    data["zones"][zone_key] = build_zone_state(display_name, cooldown_minutes)
+def add_zone(
+    data: RootData,
+    zone_key: str,
+    display_name: str,
+    cooldown_minutes: int,
+    subzone_names: list[str] | None = None,
+) -> None:
+    data["zones"][zone_key] = build_zone_state(display_name, cooldown_minutes, subzone_names)
     data["history"][zone_key] = []
+
+
+def sync_default_zones(data: RootData) -> list[str]:
+    """Adds any built-in default zone (bot/constants.py DEFAULT_ZONES) that's
+    missing from `data`, with its default sub-zones. Existing zones are left
+    untouched even if their cooldown/sub-zones have since diverged from the
+    defaults. Returns the display names of the zones that were added."""
+    added: list[str] = []
+    for zone_key, meta in DEFAULT_ZONES.items():
+        if zone_key in data["zones"]:
+            continue
+        add_zone(
+            data,
+            zone_key,
+            meta["display_name"],
+            meta["cooldown_minutes"],
+            DEFAULT_SUBZONES.get(zone_key),
+        )
+        added.append(meta["display_name"])
+    return added
 
 
 def remove_zone(data: RootData, zone_key: str) -> None:
