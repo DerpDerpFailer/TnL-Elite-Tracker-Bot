@@ -130,26 +130,42 @@ class AlertManager:
             logger.warning("Failed to send alert for %s: %s", zone_key, exc)
             return False
 
-        zone["scouting_message"] = {
-            "channel_id": getattr(channel, "id"),
-            "message_id": primary_message.id,
-        }
+        scouting_messages: list[dict] = []
+        if chunks:
+            scouting_messages.append(
+                {
+                    "channel_id": getattr(channel, "id"),
+                    "message_id": primary_message.id,
+                    "subzone_keys": chunks[0],
+                }
+            )
 
         for chunk in chunks[1:]:
             continuation_view = ScoutingView(bot, zone_key, chunk)
             try:
-                await channel.send(view=continuation_view)
+                continuation_message = await channel.send(view=continuation_view)
             except discord.Forbidden:
                 logger.warning(
                     strings.LOG_MISSING_PERMISSIONS,
                     "send a scouting continuation message",
                     getattr(channel, "id", "?"),
                 )
+                continue
             except discord.HTTPException as exc:
                 logger.warning(
                     "Failed to send scouting continuation message for %s: %s", zone_key, exc
                 )
+                continue
 
+            scouting_messages.append(
+                {
+                    "channel_id": getattr(channel, "id"),
+                    "message_id": continuation_message.id,
+                    "subzone_keys": chunk,
+                }
+            )
+
+        zone["scouting_messages"] = scouting_messages
         zone["pre_alert_sent"] = True
         return True
 

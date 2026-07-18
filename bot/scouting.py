@@ -1,17 +1,22 @@
-"""Discord UI for the pre-alert's per-sub-zone "Scouting" buttons.
+"""Discord UI for the pre-alert's per-sub-zone "Scouting" / "Elite Found"
+buttons.
 
-Clicking a button toggles that member in/out of the sub-zone's scout list
-(persisted in elite.json) and rebuilds the shared embed so the whole channel
-sees who's checking which spot. Like KillButtonView, each per-chunk view is
-persistent (`timeout=None`) and re-registered per zone/chunk at startup via
-`bot.add_view(...)` so clicks keep working on old alert messages after a
-restart.
+Each sub-zone gets a row with two buttons: "Scouting <name>" toggles that
+member in/out of the sub-zone's scout list and refreshes the shared embed for
+everyone; "Elite Found" announces the boss was located there, disables every
+scouting/found button for the whole zone (across every message — see below),
+marks the shared embed done, and posts a new pinged announcement with that
+sub-zone's map if one was uploaded.
 
-Discord caps a message at 5 action rows, so with one button per row (the
-requested layout) a zone can show at most 5 sub-zone buttons per message.
-Zones with more sub-zones get their buttons spread across several messages;
-only the first ("primary") message carries the embed, and buttons on the
-later ones fetch-and-edit that primary message to reflect a click.
+Discord caps a message at 5 action rows, so with one button-pair per row a
+zone can show at most 5 sub-zones per message. Zones with more sub-zones get
+their buttons spread across several messages; only the first ("primary")
+message carries the embed. `zone["scouting_messages"]` tracks every message
+(channel/message id + which sub-zone keys it holds) sent for the current
+cycle, which is what lets "Elite Found" reach and disable buttons on all of
+them, not just the one that was clicked. Every per-chunk view is persistent
+(`timeout=None`) and re-registered at startup via `bot.add_view(...)` so
+clicks keep working on old alert messages after a restart.
 """
 from __future__ import annotations
 
@@ -23,27 +28,32 @@ import discord
 from bot import domain, strings
 from bot.constants import MAPS_DIR
 from bot.models import ScoutingMessageRef, ZoneState
-from bot.storage import Storage
 
 if TYPE_CHECKING:
     from bot.main import EliteBot
+    from bot.storage import Storage
 
 logger = logging.getLogger(__name__)
 
-_CUSTOM_ID_PREFIX = "elite:scout:"
-MAX_BUTTONS_PER_MESSAGE = 5  # one per row; Discord allows at most 5 action rows
+_SCOUT_CUSTOM_ID_PREFIX = "elite:scout:"
+_FOUND_CUSTOM_ID_PREFIX = "elite:found:"
+MAX_ROWS_PER_MESSAGE = 5  # one sub-zone per row; Discord allows at most 5 action rows
 
 
-def custom_id_for(zone_key: str, subzone_key: str) -> str:
-    return f"{_CUSTOM_ID_PREFIX}{zone_key}:{subzone_key}"
+def scout_custom_id_for(zone_key: str, subzone_key: str) -> str:
+    return f"{_SCOUT_CUSTOM_ID_PREFIX}{zone_key}:{subzone_key}"
 
 
-def chunk_subzone_keys(zone: ZoneState, chunk_size: int = MAX_BUTTONS_PER_MESSAGE) -> list[list[str]]:
+def found_custom_id_for(zone_key: str, subzone_key: str) -> str:
+    return f"{_FOUND_CUSTOM_ID_PREFIX}{zone_key}:{subzone_key}"
+
+
+def chunk_subzone_keys(zone: ZoneState, chunk_size: int = MAX_ROWS_PER_MESSAGE) -> list[list[str]]:
     keys = list(zone["subzones"].keys())
     return [keys[i : i + chunk_size] for i in range(0, len(keys), chunk_size)]
 
 
-def build_scouting_embed(storage: Storage, zone_key: str) -> discord.Embed:
+def build_scouting_embed(storage: "Storage", zone_key: str) -> discord.Embed:
     zone = storage.data["zones"][zone_key]
     config = storage.data["config"]
 
@@ -71,8 +81,35 @@ def build_scouting_embed(storage: Storage, zone_key: str) -> discord.Embed:
     return embed
 
 
+def build_elite_found_embed(
+    storage: "Storage", zone_key: str, subzone_key: str
+) -> tuple[discord.Embed, discord.File | None]:
+    zone = storage.data["zones"][zone_key]
+    subzone_display_name = zone["subzones"][subzone_key]["display_name"]
+
+    embed = discord.Embed(
+        title=strings.elite_found_title(subzone_display_name),
+        description=strings.elite_found_description(zone["display_name"]),
+        color=discord.Color.green(),
+    )
+
+    map_path = MAPS_DIR / f"{zone_key}__{subzone_key}.png"
+    file = discord.File(map_path, filename=f"{subzone_key}.png") if map_path.exists() else None
+    if file is not None:
+        embed.set_image(url=f"attachment://{subzone_key}.png")
+
+    return embed, file
+
+
 class ScoutingView(discord.ui.View):
-    def __init__(self, bot: "EliteBot", zone_key: str, subzone_keys: list[str]) -> None:
+    def __init__(
+        self,
+        bot: "EliteBot",
+        zone_key: str,
+        subzone_keys: list[str],
+        *,
+        disabled: bool = False,
+    ) -> None:
         super().__init__(timeout=None)
         self.bot = bot
         self.zone_key = zone_key
@@ -82,22 +119,40 @@ class ScoutingView(discord.ui.View):
             subzone = subzones.get(subzone_key)
             if subzone is None:
                 continue
-            button: discord.ui.Button = discord.ui.Button(
+
+            scout_button: discord.ui.Button = discord.ui.Button(
                 label=strings.scout_button_label(subzone["display_name"]),
                 style=discord.ButtonStyle.primary,
-                custom_id=custom_id_for(zone_key, subzone_key),
+                custom_id=scout_custom_id_for(zone_key, subzone_key),
                 row=row,
+                disabled=disabled,
             )
-            button.callback = self._make_callback(subzone_key)
-            self.add_item(button)
+            scout_button.callback = self._make_scout_callback(subzone_key)
+            self.add_item(scout_button)
 
-    def _make_callback(self, subzone_key: str):
+            found_button: discord.ui.Button = discord.ui.Button(
+                label=strings.FOUND_BUTTON_LABEL,
+                style=discord.ButtonStyle.success,
+                custom_id=found_custom_id_for(zone_key, subzone_key),
+                row=row,
+                disabled=disabled,
+            )
+            found_button.callback = self._make_found_callback(subzone_key)
+            self.add_item(found_button)
+
+    def _make_scout_callback(self, subzone_key: str):
         async def _callback(interaction: discord.Interaction) -> None:
-            await self._on_click(interaction, subzone_key)
+            await self._on_scout_click(interaction, subzone_key)
 
         return _callback
 
-    async def _on_click(self, interaction: discord.Interaction, subzone_key: str) -> None:
+    def _make_found_callback(self, subzone_key: str):
+        async def _callback(interaction: discord.Interaction) -> None:
+            await self._on_found_click(interaction, subzone_key)
+
+        return _callback
+
+    async def _on_scout_click(self, interaction: discord.Interaction, subzone_key: str) -> None:
         storage = self.bot.storage
         async with storage.lock:
             zone = storage.data["zones"].get(self.zone_key)
@@ -113,7 +168,8 @@ class ScoutingView(discord.ui.View):
             zone_display_name = zone["display_name"]
             subzone_display_name = zone["subzones"][subzone_key]["display_name"]
             updated_embed = build_scouting_embed(storage, self.zone_key)
-            primary_ref = zone["scouting_message"]
+            refs = zone["scouting_messages"]
+            primary_ref = refs[0] if refs else None
 
         is_primary_message = (
             primary_ref is not None
@@ -134,7 +190,7 @@ class ScoutingView(discord.ui.View):
                     "Failed to acknowledge scouting click for %s: %s", self.zone_key, exc
                 )
             if primary_ref is not None:
-                await self._update_primary_message(primary_ref, updated_embed)
+                await self._edit_message(primary_ref, embed=updated_embed)
 
         confirmation = (
             strings.scout_confirmed(subzone_display_name, zone_display_name)
@@ -158,16 +214,88 @@ class ScoutingView(discord.ui.View):
         else:
             await interaction.response.send_message(**kwargs)
 
-    async def _update_primary_message(
-        self, primary_ref: ScoutingMessageRef, embed: discord.Embed
-    ) -> None:
+    async def _on_found_click(self, interaction: discord.Interaction, subzone_key: str) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            zone = storage.data["zones"].get(self.zone_key)
+            if zone is None or subzone_key not in zone["subzones"]:
+                await interaction.response.send_message(strings.ZONE_NOT_FOUND, ephemeral=True)
+                return
+
+            zone_display_name = zone["display_name"]
+            subzone_display_name = zone["subzones"][subzone_key]["display_name"]
+            refs = zone["scouting_messages"]
+
+            try:
+                await interaction.response.defer(ephemeral=True)
+            except discord.HTTPException as exc:
+                logger.warning(
+                    "Failed to acknowledge elite-found click for %s: %s", self.zone_key, exc
+                )
+
+            announce_channel: discord.abc.Messageable | None = None
+            for index, ref in enumerate(refs):
+                try:
+                    channel = self.bot.get_channel(ref["channel_id"])
+                    if channel is None:
+                        channel = await self.bot.fetch_channel(ref["channel_id"])
+                    message = await channel.fetch_message(ref["message_id"])
+                    disabled_view = ScoutingView(
+                        self.bot, self.zone_key, ref["subzone_keys"], disabled=True
+                    )
+                    if index == 0:
+                        announce_channel = channel
+                        done_embed = build_scouting_embed(storage, self.zone_key)
+                        done_embed.title = strings.scouting_done_title(zone_display_name)
+                        done_embed.add_field(
+                            name="​",
+                            value=strings.scouting_found_note(subzone_display_name),
+                            inline=False,
+                        )
+                        await message.edit(embed=done_embed, view=disabled_view)
+                    else:
+                        await message.edit(view=disabled_view)
+                except discord.HTTPException as exc:
+                    logger.warning(
+                        "Failed to disable scouting buttons for %s: %s", self.zone_key, exc
+                    )
+
+            if announce_channel is None and refs:
+                try:
+                    announce_channel = self.bot.get_channel(refs[0]["channel_id"])
+                    if announce_channel is None:
+                        announce_channel = await self.bot.fetch_channel(refs[0]["channel_id"])
+                except discord.HTTPException:
+                    announce_channel = None
+
+            if announce_channel is not None:
+                role_id = storage.data["config"]["alert_role_id"]
+                role_mention = f"<@&{role_id}>" if role_id else None
+                found_embed, found_file = build_elite_found_embed(
+                    storage, self.zone_key, subzone_key
+                )
+                try:
+                    send_kwargs: dict = {"content": role_mention, "embed": found_embed}
+                    if found_file is not None:
+                        send_kwargs["file"] = found_file
+                    await announce_channel.send(**send_kwargs)
+                except discord.HTTPException as exc:
+                    logger.warning(
+                        "Failed to send elite-found announcement for %s: %s", self.zone_key, exc
+                    )
+
+        confirmation = strings.found_confirmed(subzone_display_name)
+        if interaction.response.is_done():
+            await interaction.followup.send(confirmation, ephemeral=True)
+        else:
+            await interaction.response.send_message(confirmation, ephemeral=True)
+
+    async def _edit_message(self, ref: ScoutingMessageRef, **fields) -> None:
         try:
-            channel = self.bot.get_channel(primary_ref["channel_id"])
+            channel = self.bot.get_channel(ref["channel_id"])
             if channel is None:
-                channel = await self.bot.fetch_channel(primary_ref["channel_id"])
-            message = await channel.fetch_message(primary_ref["message_id"])
-            await message.edit(embed=embed)
+                channel = await self.bot.fetch_channel(ref["channel_id"])
+            message = await channel.fetch_message(ref["message_id"])
+            await message.edit(**fields)
         except discord.HTTPException as exc:
-            logger.warning(
-                "Failed to refresh primary scouting message for %s: %s", self.zone_key, exc
-            )
+            logger.warning("Failed to update scouting message for %s: %s", self.zone_key, exc)

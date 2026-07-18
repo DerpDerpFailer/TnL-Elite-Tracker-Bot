@@ -30,6 +30,7 @@ class SubzoneState(TypedDict):
 class ScoutingMessageRef(TypedDict):
     channel_id: int
     message_id: int
+    subzone_keys: list[str]
 
 
 class ZoneState(TypedDict):
@@ -41,7 +42,7 @@ class ZoneState(TypedDict):
     pre_alert_sent: bool
     start_alert_sent: bool
     subzones: dict[str, SubzoneState]
-    scouting_message: ScoutingMessageRef | None
+    scouting_messages: list[ScoutingMessageRef]
 
 
 HistoryEventType = Literal["kill", "noshow"]
@@ -94,7 +95,7 @@ def build_zone_state(
         subzones={
             slugify(name): build_subzone_state(name) for name in (subzone_names or [])
         },
-        scouting_message=None,
+        scouting_messages=[],
     )
 
 

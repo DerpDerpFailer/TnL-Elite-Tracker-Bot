@@ -22,6 +22,7 @@ from pathlib import Path
 from bot import strings
 from bot.constants import BACKUP_FILE, DATA_FILE, DEFAULT_SUBZONES, MAPS_DIR, SCHEMA_VERSION
 from bot.models import RootData, build_seed_data, build_subzone_state
+from bot.scouting import chunk_subzone_keys
 from bot.slugs import slugify
 
 logger = logging.getLogger(__name__)
@@ -111,6 +112,25 @@ class Storage:
             for zone in self.data["zones"].values():
                 zone.setdefault("scouting_message", None)
             version = 5
+
+        if version < 6:
+            # v6 adds a paired "Elite Found" button per sub-zone, which must
+            # disable every scouting message for the zone (not just the
+            # primary one) — so scouting_message (single ref) becomes
+            # scouting_messages (a list), each entry now also recording
+            # which sub-zone keys it holds so a disabled view can be
+            # rebuilt. Only the primary message is recoverable this way;
+            # any already-sent continuation messages from before this
+            # upgrade are not trackable and are left as-is.
+            for zone in self.data["zones"].values():
+                old_ref = zone.pop("scouting_message", None)
+                if old_ref is not None:
+                    chunks = chunk_subzone_keys(zone)
+                    old_ref["subzone_keys"] = chunks[0] if chunks else []
+                    zone["scouting_messages"] = [old_ref]
+                else:
+                    zone.setdefault("scouting_messages", [])
+            version = 6
 
         if version != SCHEMA_VERSION:
             logger.warning(

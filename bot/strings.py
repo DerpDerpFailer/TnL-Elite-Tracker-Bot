@@ -98,6 +98,29 @@ def scout_cancelled(subzone_display_name: str) -> str:
     return f"You're no longer scouting **{subzone_display_name}**."
 
 
+FOUND_BUTTON_LABEL = "Elite Found"
+
+
+def scouting_done_title(zone_display_name: str) -> str:
+    return f"{zone_display_name} Scouting - Done"
+
+
+def scouting_found_note(subzone_display_name: str) -> str:
+    return f"**Elite found at {subzone_display_name}**"
+
+
+def elite_found_title(subzone_display_name: str) -> str:
+    return f"\U0001f3af Elite found at {subzone_display_name}!"
+
+
+def elite_found_description(zone_display_name: str) -> str:
+    return f"Spotted in **{zone_display_name}** — go go go!"
+
+
+def found_confirmed(subzone_display_name: str) -> str:
+    return f"Marked **{subzone_display_name}** as found — announcement posted."
+
+
 def start_alert_title(display_name: str) -> str:
     return f"\U0001f6a8 {display_name} spawn time has arrived"
 

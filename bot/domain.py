@@ -36,7 +36,7 @@ __all__ = [
 def _reset_scouting_state(zone: ZoneState) -> None:
     for subzone in zone["subzones"].values():
         subzone["scouts"] = []
-    zone["scouting_message"] = None
+    zone["scouting_messages"] = []
 
 
 def _snapshot_for_undo(data: RootData, zone_key: str) -> None:
