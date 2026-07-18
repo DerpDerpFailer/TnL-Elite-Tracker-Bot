@@ -101,7 +101,7 @@ def scouting_field_value(mentions: list[str]) -> str:
 
 
 def scout_button_label(subzone_display_name: str) -> str:
-    return f"Scouting {subzone_display_name}"
+    return f"\U0001f50d {subzone_display_name}"
 
 
 def scout_confirmed(subzone_display_name: str, zone_display_name: str) -> str:
