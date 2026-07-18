@@ -2,9 +2,16 @@
 
 Clicking a button toggles that member in/out of the sub-zone's scout list
 (persisted in elite.json) and rebuilds the shared embed so the whole channel
-sees who's checking which spot. Like KillButtonView, this view is persistent
-(`timeout=None`) and re-registered per zone at startup via `bot.add_view(...)`
-so clicks keep working on old alert messages after a restart.
+sees who's checking which spot. Like KillButtonView, each per-chunk view is
+persistent (`timeout=None`) and re-registered per zone/chunk at startup via
+`bot.add_view(...)` so clicks keep working on old alert messages after a
+restart.
+
+Discord caps a message at 5 action rows, so with one button per row (the
+requested layout) a zone can show at most 5 sub-zone buttons per message.
+Zones with more sub-zones get their buttons spread across several messages;
+only the first ("primary") message carries the embed, and buttons on the
+later ones fetch-and-edit that primary message to reflect a click.
 """
 from __future__ import annotations
 
@@ -15,6 +22,7 @@ import discord
 
 from bot import domain, strings
 from bot.constants import MAPS_DIR
+from bot.models import ScoutingMessageRef, ZoneState
 from bot.storage import Storage
 
 if TYPE_CHECKING:
@@ -23,10 +31,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _CUSTOM_ID_PREFIX = "elite:scout:"
+MAX_BUTTONS_PER_MESSAGE = 5  # one per row; Discord allows at most 5 action rows
 
 
 def custom_id_for(zone_key: str, subzone_key: str) -> str:
     return f"{_CUSTOM_ID_PREFIX}{zone_key}:{subzone_key}"
+
+
+def chunk_subzone_keys(zone: ZoneState, chunk_size: int = MAX_BUTTONS_PER_MESSAGE) -> list[list[str]]:
+    keys = list(zone["subzones"].keys())
+    return [keys[i : i + chunk_size] for i in range(0, len(keys), chunk_size)]
 
 
 def build_scouting_embed(storage: Storage, zone_key: str) -> discord.Embed:
@@ -58,17 +72,21 @@ def build_scouting_embed(storage: Storage, zone_key: str) -> discord.Embed:
 
 
 class ScoutingView(discord.ui.View):
-    def __init__(self, bot: "EliteBot", zone_key: str) -> None:
+    def __init__(self, bot: "EliteBot", zone_key: str, subzone_keys: list[str]) -> None:
         super().__init__(timeout=None)
         self.bot = bot
         self.zone_key = zone_key
 
-        zone = bot.storage.data["zones"].get(zone_key, {})
-        for subzone_key, subzone in zone.get("subzones", {}).items():
+        subzones = bot.storage.data["zones"].get(zone_key, {}).get("subzones", {})
+        for row, subzone_key in enumerate(subzone_keys):
+            subzone = subzones.get(subzone_key)
+            if subzone is None:
+                continue
             button: discord.ui.Button = discord.ui.Button(
                 label=strings.scout_button_label(subzone["display_name"]),
                 style=discord.ButtonStyle.primary,
                 custom_id=custom_id_for(zone_key, subzone_key),
+                row=row,
             )
             button.callback = self._make_callback(subzone_key)
             self.add_item(button)
@@ -95,11 +113,28 @@ class ScoutingView(discord.ui.View):
             zone_display_name = zone["display_name"]
             subzone_display_name = zone["subzones"][subzone_key]["display_name"]
             updated_embed = build_scouting_embed(storage, self.zone_key)
+            primary_ref = zone["scouting_message"]
 
-        try:
-            await interaction.response.edit_message(embed=updated_embed, view=self)
-        except discord.HTTPException as exc:
-            logger.warning("Failed to update scouting embed for %s: %s", self.zone_key, exc)
+        is_primary_message = (
+            primary_ref is not None
+            and interaction.message is not None
+            and interaction.message.id == primary_ref["message_id"]
+        )
+
+        if is_primary_message:
+            try:
+                await interaction.response.edit_message(embed=updated_embed, view=self)
+            except discord.HTTPException as exc:
+                logger.warning("Failed to update scouting embed for %s: %s", self.zone_key, exc)
+        else:
+            try:
+                await interaction.response.defer(ephemeral=True)
+            except discord.HTTPException as exc:
+                logger.warning(
+                    "Failed to acknowledge scouting click for %s: %s", self.zone_key, exc
+                )
+            if primary_ref is not None:
+                await self._update_primary_message(primary_ref, updated_embed)
 
         confirmation = (
             strings.scout_confirmed(subzone_display_name, zone_display_name)
@@ -122,3 +157,17 @@ class ScoutingView(discord.ui.View):
             await interaction.followup.send(**kwargs)
         else:
             await interaction.response.send_message(**kwargs)
+
+    async def _update_primary_message(
+        self, primary_ref: ScoutingMessageRef, embed: discord.Embed
+    ) -> None:
+        try:
+            channel = self.bot.get_channel(primary_ref["channel_id"])
+            if channel is None:
+                channel = await self.bot.fetch_channel(primary_ref["channel_id"])
+            message = await channel.fetch_message(primary_ref["message_id"])
+            await message.edit(embed=embed)
+        except discord.HTTPException as exc:
+            logger.warning(
+                "Failed to refresh primary scouting message for %s: %s", self.zone_key, exc
+            )

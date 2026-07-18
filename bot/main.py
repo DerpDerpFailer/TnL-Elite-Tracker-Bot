@@ -14,7 +14,7 @@ from bot import strings
 from bot.alerts import AlertManager
 from bot.config import load_env_config
 from bot.perpetual_message import PerpetualMessageManager
-from bot.scouting import ScoutingView
+from bot.scouting import ScoutingView, chunk_subzone_keys
 from bot.storage import Storage
 from bot.views import KillButtonView
 
@@ -43,12 +43,12 @@ class EliteBot(commands.Bot):
         self.storage.load_or_seed()
 
         # Re-register one persistent "Elite killed" button view and one
-        # persistent scouting-buttons view per known zone so clicks on alert
+        # persistent scouting-buttons view per zone/chunk so clicks on alert
         # messages posted before this restart keep routing correctly.
         for zone_key, zone in self.storage.data["zones"].items():
             self.add_view(KillButtonView(self, zone_key))
-            if zone["subzones"]:
-                self.add_view(ScoutingView(self, zone_key))
+            for chunk in chunk_subzone_keys(zone):
+                self.add_view(ScoutingView(self, zone_key, chunk))
 
         for extension in EXTENSIONS:
             await self.load_extension(extension)

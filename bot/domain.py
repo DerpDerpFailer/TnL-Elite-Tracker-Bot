@@ -33,9 +33,10 @@ __all__ = [
 ]
 
 
-def _clear_scouts(zone: ZoneState) -> None:
+def _reset_scouting_state(zone: ZoneState) -> None:
     for subzone in zone["subzones"].values():
         subzone["scouts"] = []
+    zone["scouting_message"] = None
 
 
 def _snapshot_for_undo(data: RootData, zone_key: str) -> None:
@@ -65,7 +66,7 @@ def record_kill(
     zone["spawn_at"] = spawn_at
     zone["pre_alert_sent"] = False
     zone["start_alert_sent"] = False
-    _clear_scouts(zone)
+    _reset_scouting_state(zone)
 
     _append_history(
         data,
@@ -89,7 +90,7 @@ def record_noshow(
     zone["spawn_at"] = missed_spawn_at + zone["cooldown_minutes"] * 60
     zone["pre_alert_sent"] = False
     zone["start_alert_sent"] = False
-    _clear_scouts(zone)
+    _reset_scouting_state(zone)
 
     _append_history(
         data,
@@ -127,7 +128,7 @@ def reset_zone(data: RootData, zone_key: str) -> None:
     zone = data["zones"][zone_key]
     new_zone = build_zone_state(zone["display_name"], zone["cooldown_minutes"])
     new_zone["subzones"] = zone["subzones"]
-    _clear_scouts(new_zone)
+    _reset_scouting_state(new_zone)
     data["zones"][zone_key] = new_zone
     data["history"][zone_key] = []
     data["undo"].pop(zone_key, None)

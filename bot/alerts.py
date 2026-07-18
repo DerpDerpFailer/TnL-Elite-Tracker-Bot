@@ -14,7 +14,7 @@ from bot import strings
 from bot.constants import MAPS_DIR
 from bot.models import ZoneState
 from bot.perpetual_message import PerpetualMessageManager
-from bot.scouting import ScoutingView, build_scouting_embed
+from bot.scouting import ScoutingView, build_scouting_embed, chunk_subzone_keys
 from bot.storage import Storage
 from bot.views import KillButtonView
 
@@ -97,29 +97,89 @@ class AlertManager:
         kind: str,
         role_mention: str | None,
     ) -> bool:
-        spawn_at = int(zone["spawn_at"])
+        if kind == "pre":
+            return await self._send_pre_alert(bot, channel, zone_key, zone, role_mention)
+        return await self._send_start_alert(bot, channel, zone_key, zone, role_mention)
 
+    async def _send_pre_alert(
+        self,
+        bot: discord.Client,
+        channel: discord.abc.Messageable,
+        zone_key: str,
+        zone: ZoneState,
+        role_mention: str | None,
+    ) -> bool:
+        embed = build_scouting_embed(self.storage, zone_key)
         map_path = MAPS_DIR / f"{zone_key}.png"
         file = discord.File(map_path, filename=f"{zone_key}.png") if map_path.exists() else None
 
-        if kind == "pre":
-            embed = build_scouting_embed(self.storage, zone_key)
-            view: discord.ui.View | None = ScoutingView(bot, zone_key)
-        else:
-            embed = discord.Embed(color=discord.Color.red())
-            embed.title = strings.start_alert_title(zone["display_name"])
-            embed.description = strings.start_alert_description(spawn_at)
-            embed.add_field(name="​", value=strings.MAP_REMINDER_NOTE, inline=False)
-            if file is not None:
-                embed.set_image(url=f"attachment://{zone_key}.png")
-            view = KillButtonView(bot, zone_key)
+        chunks = chunk_subzone_keys(zone)
+        primary_view = ScoutingView(bot, zone_key, chunks[0]) if chunks else None
 
         try:
             send_kwargs: dict = {"content": role_mention, "embed": embed}
             if file is not None:
                 send_kwargs["file"] = file
-            if view is not None:
-                send_kwargs["view"] = view
+            if primary_view is not None:
+                send_kwargs["view"] = primary_view
+            primary_message = await channel.send(**send_kwargs)
+        except discord.Forbidden:
+            logger.warning(strings.LOG_MISSING_PERMISSIONS, "send an alert", getattr(channel, "id", "?"))
+            return False
+        except discord.HTTPException as exc:
+            logger.warning("Failed to send alert for %s: %s", zone_key, exc)
+            return False
+
+        zone["scouting_message"] = {
+            "channel_id": getattr(channel, "id"),
+            "message_id": primary_message.id,
+        }
+
+        for chunk in chunks[1:]:
+            continuation_view = ScoutingView(bot, zone_key, chunk)
+            try:
+                await channel.send(
+                    content=strings.scouting_continued_note(zone["display_name"]),
+                    view=continuation_view,
+                )
+            except discord.Forbidden:
+                logger.warning(
+                    strings.LOG_MISSING_PERMISSIONS,
+                    "send a scouting continuation message",
+                    getattr(channel, "id", "?"),
+                )
+            except discord.HTTPException as exc:
+                logger.warning(
+                    "Failed to send scouting continuation message for %s: %s", zone_key, exc
+                )
+
+        zone["pre_alert_sent"] = True
+        return True
+
+    async def _send_start_alert(
+        self,
+        bot: discord.Client,
+        channel: discord.abc.Messageable,
+        zone_key: str,
+        zone: ZoneState,
+        role_mention: str | None,
+    ) -> bool:
+        spawn_at = int(zone["spawn_at"])
+        map_path = MAPS_DIR / f"{zone_key}.png"
+        file = discord.File(map_path, filename=f"{zone_key}.png") if map_path.exists() else None
+
+        embed = discord.Embed(color=discord.Color.red())
+        embed.title = strings.start_alert_title(zone["display_name"])
+        embed.description = strings.start_alert_description(spawn_at)
+        embed.add_field(name="​", value=strings.MAP_REMINDER_NOTE, inline=False)
+        if file is not None:
+            embed.set_image(url=f"attachment://{zone_key}.png")
+        view = KillButtonView(bot, zone_key)
+
+        try:
+            send_kwargs: dict = {"content": role_mention, "embed": embed, "view": view}
+            if file is not None:
+                send_kwargs["file"] = file
             await channel.send(**send_kwargs)
         except discord.Forbidden:
             logger.warning(strings.LOG_MISSING_PERMISSIONS, "send an alert", getattr(channel, "id", "?"))
@@ -128,8 +188,5 @@ class AlertManager:
             logger.warning("Failed to send alert for %s: %s", zone_key, exc)
             return False
 
-        if kind == "pre":
-            zone["pre_alert_sent"] = True
-        else:
-            zone["start_alert_sent"] = True
+        zone["start_alert_sent"] = True
         return True

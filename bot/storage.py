@@ -104,6 +104,14 @@ class Storage:
                 zone.pop("window_end", None)
             version = 4
 
+        if version < 5:
+            # v5 splits scouting buttons across multiple messages (one
+            # button per row, max 5 rows) for zones with >5 sub-zones, so
+            # each zone now tracks which message holds the shared embed.
+            for zone in self.data["zones"].values():
+                zone.setdefault("scouting_message", None)
+            version = 5
+
         if version != SCHEMA_VERSION:
             logger.warning(
                 "Data file version %s does not match expected %s after migrations; using as-is",
