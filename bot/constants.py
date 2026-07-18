@@ -35,4 +35,7 @@ DEFAULT_ZONES: Final[dict[str, DefaultZone]] = {
     "syleus": {"display_name": "Syleus", "cooldown_minutes": 4 * 60},
     "talandre": {"display_name": "Talandre", "cooldown_minutes": 6 * 60},
     "nix": {"display_name": "Nix", "cooldown_minutes": 6 * 60},
+    "laslan-dungeon": {"display_name": "Laslan Dungeon", "cooldown_minutes": 4 * 60},
+    "stonegard-dungeon": {"display_name": "Stonegard Dungeon", "cooldown_minutes": 4 * 60},
+    "talandre-dungeon": {"display_name": "Talandre Dungeon", "cooldown_minutes": 6 * 60},
 }

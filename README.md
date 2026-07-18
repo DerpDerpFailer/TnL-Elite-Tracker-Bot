@@ -237,7 +237,7 @@ Examples:
 ## Data file layout
 
 Seeded automatically on first boot if `/data/elite.json` doesn't exist, with
-the five zones the game currently ships with:
+the eight zones the guild currently tracks:
 
 | Zone | Default cooldown |
 |---|---|
@@ -246,6 +246,9 @@ the five zones the game currently ships with:
 | Syleus | 4h |
 | Talandre | 6h |
 | Nix | 6h |
+| Laslan Dungeon | 4h |
+| Stonegard Dungeon | 4h |
+| Talandre Dungeon | 6h |
 
 These are community estimates and are expected to change after patches —
 update them with `/elite-config cooldown`, no redeploy needed.
