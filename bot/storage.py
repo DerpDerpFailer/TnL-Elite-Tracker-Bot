@@ -143,6 +143,16 @@ class Storage:
                 zone.setdefault("found_this_cycle", False)
             version = 7
 
+        if version < 8:
+            # v8: "Elite killed" now deletes the scouting message(s) and the
+            # Elite Found announcement instead of disabling their buttons,
+            # posting a new "Boss killed" summary in their place — so the
+            # zone now also tracks the Found announcement's own message ref
+            # (previously untracked) to be able to find and delete it.
+            for zone in self.data["zones"].values():
+                zone.setdefault("found_announcement_message", None)
+            version = 8
+
         if version != SCHEMA_VERSION:
             logger.warning(
                 "Data file version %s does not match expected %s after migrations; using as-is",

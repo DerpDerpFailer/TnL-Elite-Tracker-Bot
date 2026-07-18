@@ -142,13 +142,15 @@ def found_undone(zone_display_name: str) -> str:
     return f"Undid the Elite Found report for **{zone_display_name}** — scouting re-enabled."
 
 
+BOSS_KILLED_TITLE = "\U0001f480 Boss killed"
+BOSS_KILLED_ZONE_FIELD = "Zone"
+BOSS_KILLED_SUBZONE_FIELD = "Sub-zone"
+BOSS_KILLED_UNKNOWN_SUBZONE = "Unknown"
+BOSS_KILLED_TIME_FIELD = "Killed at"
+BOSS_KILLED_REPORTED_BY_FIELD = "Reported by"
+
+
 KILL_BUTTON_EMOJI = "\U0001f480"  # 💀
-
-
-def scouting_kill_note(subzone_display_name: str | None) -> str:
-    return (
-        f"**Elite killed at {subzone_display_name}**" if subzone_display_name else "**Elite killed**"
-    )
 
 
 # ---------------------------------------------------------------------------

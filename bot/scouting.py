@@ -11,20 +11,23 @@ in), while 🔍/📍 stay active — the boss may not actually be found/killed
 exactly on schedule. Clicking 📍 disables 🔍/📍 for the whole zone (across
 every message — finding isn't the same as killing, so 💀 stays clickable)
 and posts a new pinged announcement with its own 💀/🔄 buttons. Clicking 💀
-(from either place) disables everything for good and records the kill
-(optionally with its sub-zone); clicking 🔄 on the announcement instead
-reverts the found report: it re-enables 🔍/📍 on the scouting message(s) and
-deletes the announcement.
+(from either place) closes out *this zone's* cycle only — every scouting
+message and the Elite Found announcement (if any) for that zone are
+*deleted* (not just disabled), and a new "Boss killed" summary embed (zone,
+sub-zone, kill time, reporter) is posted in their place. Clicking 🔄 on the
+announcement instead reverts the found report without killing anything: it
+re-enables 🔍/📍 on the scouting message(s) and deletes the announcement.
 
 Discord caps a message at 5 action rows, so with one sub-zone per row a zone
 can show at most 5 sub-zones per message; zones with more get their buttons
 spread across several messages. Only the first ("primary") message carries
-the embed. `zone["scouting_messages"]` tracks every message sent for the
-current cycle (channel/message id + which sub-zone keys it holds), which is
-what lets 📍/💀 reach and update every one of them, not just the one that was
-clicked. Every view here is persistent (`timeout=None`) and re-registered at
-startup via `bot.add_view(...)` so clicks keep working on old alert messages
-after a restart.
+the embed. `zone["scouting_messages"]` and `zone["found_announcement_message"]`
+track every message sent for the current cycle (channel/message id + which
+sub-zone keys each scouting message holds), which is what lets 📍/💀 reach
+and update/delete every one of them, not just the one that was clicked.
+Every view here is persistent (`timeout=None`) and re-registered at startup
+via `bot.add_view(...)` so clicks keep working on old alert messages after a
+restart.
 """
 from __future__ import annotations
 
@@ -136,6 +139,25 @@ def build_elite_found_embed(
     return embed, file
 
 
+def build_boss_killed_embed(
+    zone_display_name: str, subzone_display_name: str | None, kill_ts: float, user_id: int
+) -> discord.Embed:
+    embed = discord.Embed(title=strings.BOSS_KILLED_TITLE, color=discord.Color.dark_red())
+    embed.add_field(name=strings.BOSS_KILLED_ZONE_FIELD, value=zone_display_name, inline=True)
+    embed.add_field(
+        name=strings.BOSS_KILLED_SUBZONE_FIELD,
+        value=subzone_display_name or strings.BOSS_KILLED_UNKNOWN_SUBZONE,
+        inline=True,
+    )
+    embed.add_field(
+        name=strings.BOSS_KILLED_TIME_FIELD, value=f"<t:{int(kill_ts)}:F>", inline=False
+    )
+    embed.add_field(
+        name=strings.BOSS_KILLED_REPORTED_BY_FIELD, value=f"<@{user_id}>", inline=False
+    )
+    return embed
+
+
 async def _resolve_channel(bot: "EliteBot", channel_id: int) -> discord.abc.Messageable | None:
     channel = bot.get_channel(channel_id)
     if channel is None:
@@ -146,15 +168,30 @@ async def _resolve_channel(bot: "EliteBot", channel_id: int) -> discord.abc.Mess
     return channel
 
 
+async def _delete_tracked_message(bot: "EliteBot", zone_key: str, ref: dict, what: str) -> None:
+    channel = await _resolve_channel(bot, ref["channel_id"])
+    if channel is None:
+        logger.warning(
+            "Channel %s could not be resolved, skipping %s deletion", ref["channel_id"], what
+        )
+        return
+    try:
+        message = await channel.fetch_message(ref["message_id"])
+        await message.delete()
+    except discord.HTTPException as exc:
+        logger.warning("Failed to delete %s for %s: %s", what, zone_key, exc)
+
+
 async def record_kill_and_close_scouting(
     bot: "EliteBot", zone_key: str, subzone_key: str, user_id: int, user_name: str
 ) -> ZoneState | None:
-    """Records the kill (optionally for a specific sub-zone) and disables
-    every scouting/found/kill button across every message tracked for the
-    zone's current cycle, marking the primary one done. Shared by the
-    scouting message's per-row kill button and the Elite Found
-    announcement's kill button. Returns None if the zone/sub-zone no longer
-    exists (e.g. removed by an admin mid-cycle)."""
+    """Records the kill (optionally for a specific sub-zone), then closes
+    out *this zone's* cycle only: every scouting message and the Elite Found
+    announcement (if any) tracked for it are deleted, replaced by a new
+    "Boss killed" summary posted in the same channel. Shared by the scouting
+    message's per-row kill button and the Elite Found announcement's kill
+    button. Returns None if the zone/sub-zone no longer exists (e.g. removed
+    by an admin mid-cycle)."""
     storage = bot.storage
     async with storage.lock:
         zone = storage.data["zones"].get(zone_key)
@@ -163,46 +200,37 @@ async def record_kill_and_close_scouting(
             return None
 
         subzone_display_name = zone["subzones"][subzone_key]["display_name"] if has_subzone else None
-        refs = zone["scouting_messages"]
+        scouting_refs = list(zone["scouting_messages"])
+        found_ref = zone["found_announcement_message"]
 
         zone_state = domain.record_kill(
             storage.data, zone_key, time.time(), user_id, user_name, subzone_display_name
         )
         await storage.save()
 
-        zone_display_name = zone_state["display_name"]
-        for index, ref in enumerate(refs):
-            channel = await _resolve_channel(bot, ref["channel_id"])
-            if channel is None:
-                logger.warning(
-                    "Channel %s could not be resolved, skipping scouting message update",
-                    ref["channel_id"],
-                )
-                continue
+        for ref in scouting_refs:
+            await _delete_tracked_message(bot, zone_key, ref, "scouting message")
+
+        if found_ref is not None:
+            await _delete_tracked_message(bot, zone_key, found_ref, "elite-found announcement")
+
+        target_channel = None
+        if scouting_refs:
+            target_channel = await _resolve_channel(bot, scouting_refs[0]["channel_id"])
+        elif found_ref is not None:
+            target_channel = await _resolve_channel(bot, found_ref["channel_id"])
+
+        if target_channel is not None:
+            killed_embed = build_boss_killed_embed(
+                zone_state["display_name"],
+                subzone_display_name,
+                zone_state["last_kill_at"],
+                user_id,
+            )
             try:
-                message = await channel.fetch_message(ref["message_id"])
-                disabled_view = ScoutingView(
-                    bot,
-                    zone_key,
-                    ref["subzone_keys"],
-                    show_kill_button=True,
-                    scout_disabled=True,
-                    found_disabled=True,
-                    kill_disabled=True,
-                )
-                if index == 0:
-                    done_embed = build_scouting_embed(storage, zone_key)
-                    done_embed.title = strings.scouting_done_title(zone_display_name)
-                    done_embed.add_field(
-                        name="​",
-                        value=strings.scouting_kill_note(subzone_display_name),
-                        inline=False,
-                    )
-                    await message.edit(embed=done_embed, view=disabled_view)
-                else:
-                    await message.edit(view=disabled_view)
+                await target_channel.send(embed=killed_embed)
             except discord.HTTPException as exc:
-                logger.warning("Failed to disable scouting buttons for %s: %s", zone_key, exc)
+                logger.warning("Failed to send boss-killed summary for %s: %s", zone_key, exc)
 
     return zone_state
 
@@ -217,7 +245,6 @@ class ScoutingView(discord.ui.View):
         show_kill_button: bool = False,
         scout_disabled: bool = False,
         found_disabled: bool = False,
-        kill_disabled: bool = False,
     ) -> None:
         super().__init__(timeout=None)
         self.bot = bot
@@ -227,7 +254,7 @@ class ScoutingView(discord.ui.View):
 
         if not subzone_keys:
             if show_kill_button:
-                self._add_kill_button(zone_key, NO_SUBZONE_KEY, 0, kill_disabled)
+                self._add_kill_button(zone_key, NO_SUBZONE_KEY, 0)
             return
 
         for row, subzone_key in enumerate(subzone_keys):
@@ -256,15 +283,14 @@ class ScoutingView(discord.ui.View):
             self.add_item(found_button)
 
             if show_kill_button:
-                self._add_kill_button(zone_key, subzone_key, row, kill_disabled)
+                self._add_kill_button(zone_key, subzone_key, row)
 
-    def _add_kill_button(self, zone_key: str, subzone_key: str, row: int, disabled: bool) -> None:
+    def _add_kill_button(self, zone_key: str, subzone_key: str, row: int) -> None:
         kill_button: discord.ui.Button = discord.ui.Button(
             emoji=strings.KILL_BUTTON_EMOJI,
             style=discord.ButtonStyle.danger,
             custom_id=kill_custom_id_for(zone_key, subzone_key),
             row=row,
-            disabled=disabled,
         )
         kill_button.callback = self._make_kill_callback(subzone_key)
         self.add_item(kill_button)
@@ -389,7 +415,6 @@ class ScoutingView(discord.ui.View):
                         show_kill_button=True,
                         scout_disabled=True,
                         found_disabled=True,
-                        kill_disabled=False,
                     )
                     if index == 0:
                         announce_channel = channel
@@ -433,11 +458,17 @@ class ScoutingView(discord.ui.View):
                     }
                     if found_file is not None:
                         send_kwargs["file"] = found_file
-                    await announce_channel.send(**send_kwargs)
+                    announcement_message = await announce_channel.send(**send_kwargs)
                 except discord.HTTPException as exc:
                     logger.warning(
                         "Failed to send elite-found announcement for %s: %s", self.zone_key, exc
                     )
+                else:
+                    zone["found_announcement_message"] = {
+                        "channel_id": announce_channel.id,
+                        "message_id": announcement_message.id,
+                    }
+                    await storage.save()
 
         confirmation = strings.found_confirmed(subzone_display_name)
         if interaction.response.is_done():
@@ -477,9 +508,7 @@ class ScoutingView(discord.ui.View):
 class FoundAnnouncementView(discord.ui.View):
     """The 💀/🔄 buttons attached to the Elite Found announcement message."""
 
-    def __init__(
-        self, bot: "EliteBot", zone_key: str, subzone_key: str, *, disabled: bool = False
-    ) -> None:
+    def __init__(self, bot: "EliteBot", zone_key: str, subzone_key: str) -> None:
         super().__init__(timeout=None)
         self.bot = bot
         self.zone_key = zone_key
@@ -490,7 +519,6 @@ class FoundAnnouncementView(discord.ui.View):
             style=discord.ButtonStyle.danger,
             custom_id=found_kill_custom_id_for(zone_key, subzone_key),
             row=0,
-            disabled=disabled,
         )
         kill_button.callback = self._on_kill_click
         self.add_item(kill_button)
@@ -500,7 +528,6 @@ class FoundAnnouncementView(discord.ui.View):
             style=discord.ButtonStyle.secondary,
             custom_id=found_undo_custom_id_for(zone_key, subzone_key),
             row=0,
-            disabled=disabled,
         )
         undo_button.callback = self._on_undo_click
         self.add_item(undo_button)
@@ -513,24 +540,15 @@ class FoundAnnouncementView(discord.ui.View):
                 "Failed to acknowledge elite-killed click for %s: %s", self.zone_key, exc
             )
 
+        # record_kill_and_close_scouting deletes this very announcement
+        # message (tracked as found_announcement_message) as part of closing
+        # out the zone's cycle, so there's nothing left here to disable/edit.
         zone_state = await record_kill_and_close_scouting(
             self.bot, self.zone_key, self.subzone_key, interaction.user.id, str(interaction.user)
         )
         if zone_state is None:
             await interaction.followup.send(strings.ZONE_NOT_FOUND, ephemeral=True)
             return
-
-        try:
-            disabled_view = FoundAnnouncementView(
-                self.bot, self.zone_key, self.subzone_key, disabled=True
-            )
-            await interaction.message.edit(view=disabled_view)
-        except discord.HTTPException as exc:
-            logger.warning(
-                "Failed to disable elite-found announcement buttons for %s: %s",
-                self.zone_key,
-                exc,
-            )
 
         confirmation = strings.killed_confirmation(zone_state["display_name"], int(zone_state["spawn_at"]))
         await interaction.followup.send(confirmation, ephemeral=True)
@@ -547,6 +565,7 @@ class FoundAnnouncementView(discord.ui.View):
             spawn_due = zone["start_alert_sent"]
             refs = zone["scouting_messages"]
             zone["found_this_cycle"] = False
+            zone["found_announcement_message"] = None
             await storage.save()
 
         try:

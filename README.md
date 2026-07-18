@@ -49,12 +49,14 @@ State is a single JSON file (`/data/elite.json`), written atomically with a
 - Once the spawn time is reached, that same scouting message is edited
   in-place (title → "... Scouting — Spawn Due", no new message, no ping) to
   add a third button per row: a plain 💀 **"Elite killed"** button (icon
-  only, to keep the row compact). Scouting/Elite Found stay active (the
-  boss may not spawn exactly on schedule), but clicking 💀 — on whichever
-  sub-zone row it actually died in — disables every button for the zone for
-  good, records that sub-zone against the kill (see `/elite-status` and the
-  perpetual message), and resets the timer. It's the button equivalent of
-  `/elite-killed`, with no separate confirmation embed.
+  only, to keep the row compact) — also present on the Elite Found
+  announcement, so the kill can be reported from either place. Scouting/Elite
+  Found stay active after spawn time (the boss may not pop exactly on
+  schedule), but clicking 💀 — on whichever sub-zone row it actually died in
+  — closes out *that zone's* cycle only: every scouting message and the
+  Elite Found announcement for that zone are deleted, and a new "💀 Boss
+  killed" embed is posted in their place with the zone, sub-zone, kill time
+  and who reported it. It's the button equivalent of `/elite-killed`.
 - Discord caps a message at 5 button rows, so zones with more than 5
   sub-zones get extra messages for the rest of the buttons — all of them
   stay in sync with the same shared embed on the first message, and all get
@@ -296,7 +298,7 @@ Top-level JSON structure:
 
 ```jsonc
 {
-  "version": 7,
+  "version": 8,
   "config": {
     "channel_id": null,
     "alert_channel_id": null,
@@ -324,7 +326,8 @@ Top-level JSON structure:
         }
         // ...
       },
-      "scouting_messages": []
+      "scouting_messages": [],
+      "found_announcement_message": null
     }
     // ...
   },
@@ -342,12 +345,14 @@ then. `last_kill_subzone` records which sub-zone the last kill happened in
 list holds the Discord user IDs currently scouting it for that pending
 spawn; it's cleared automatically whenever a new kill or no-show
 recalculates `spawn_at`, along with `found_this_cycle` (set once "Elite
-Found" is clicked, so the spawn-time edit doesn't overwrite that state) and
+Found" is clicked, so the spawn-time edit doesn't overwrite that state),
 `scouting_messages` — a list of `{"channel_id", "message_id",
 "subzone_keys"}`, one entry per scouting message sent this cycle (the first
-holds the live embed) — this is what lets "Elite Found"/"Elite killed"
-reach and update every message for the zone, not just the one that was
-clicked.
+holds the live embed) — and `found_announcement_message` (`{"channel_id",
+"message_id"}` or `null`). Together these are what let "Elite killed" find
+and delete every message belonging to that zone's cycle, regardless of
+which button (scouting message or Elite Found announcement) it was clicked
+from.
 
 Map images live alongside it in the named Docker volume: region-level maps
 at `/data/maps/<zone>.png`, sub-zone maps at `/data/maps/<zone>__<subzone>.png`.

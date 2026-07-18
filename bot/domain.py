@@ -40,6 +40,7 @@ def _reset_scouting_state(zone: ZoneState) -> None:
         subzone["scouts"] = []
     zone["scouting_messages"] = []
     zone["found_this_cycle"] = False
+    zone["found_announcement_message"] = None
 
 
 def _snapshot_for_undo(data: RootData, zone_key: str) -> None:

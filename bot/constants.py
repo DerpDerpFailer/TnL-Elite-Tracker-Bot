@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Final, TypedDict
 
-SCHEMA_VERSION: Final[int] = 7
+SCHEMA_VERSION: Final[int] = 8
 
 DATA_DIR: Final[Path] = Path("/data")
 DATA_FILE: Final[Path] = DATA_DIR / "elite.json"
