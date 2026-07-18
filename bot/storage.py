@@ -20,7 +20,7 @@ import tempfile
 from pathlib import Path
 
 from bot import strings
-from bot.constants import BACKUP_FILE, DATA_FILE, DEFAULT_SUBZONES, MAPS_DIR, SCHEMA_VERSION
+from bot.constants import BACKUP_FILE, DATA_FILE, DEFAULT_SUBZONES, SCHEMA_VERSION
 from bot.models import RootData, build_seed_data, build_subzone_state
 from bot.scouting import chunk_subzone_keys
 from bot.slugs import slugify
@@ -38,7 +38,6 @@ class Storage:
     def load_or_seed(self) -> None:
         """Synchronous startup load. Must run before the bot logs in."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        MAPS_DIR.mkdir(parents=True, exist_ok=True)
 
         loaded = self._try_read(self.path)
         if loaded is not None:
