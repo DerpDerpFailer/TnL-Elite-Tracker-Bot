@@ -75,7 +75,7 @@ def record_kill(
     zone["last_kill_subzone"] = subzone_display_name
     zone["spawn_at"] = spawn_at
     zone["pre_alert_sent"] = False
-    zone["start_alert_sent"] = False
+    zone["spawn_due_marked"] = False
     _reset_scouting_state(zone)
 
     _append_history(
@@ -99,7 +99,7 @@ def record_noshow(
     missed_spawn_at = zone["spawn_at"]
     zone["spawn_at"] = missed_spawn_at + zone["cooldown_minutes"] * 60
     zone["pre_alert_sent"] = False
-    zone["start_alert_sent"] = False
+    zone["spawn_due_marked"] = False
     _reset_scouting_state(zone)
 
     _append_history(

@@ -66,7 +66,7 @@ class AlertManager:
                     continue
                 if not zone["pre_alert_sent"] and now >= zone["spawn_at"] - offset_seconds:
                     due.append((key, "pre"))
-                if not zone["start_alert_sent"] and now >= zone["spawn_at"]:
+                if not zone["spawn_due_marked"] and now >= zone["spawn_at"]:
                     due.append((key, "spawn_due"))
 
             if not due:
@@ -170,7 +170,7 @@ class AlertManager:
         if zone["found_this_cycle"]:
             # Already further along (someone found it) — don't clobber that
             # state, just stop this from being re-checked every 30s.
-            zone["start_alert_sent"] = True
+            zone["spawn_due_marked"] = True
             return True
 
         for index, ref in enumerate(zone["scouting_messages"]):
@@ -188,5 +188,5 @@ class AlertManager:
             except discord.HTTPException as exc:
                 logger.warning("Failed to mark spawn due for %s: %s", zone_key, exc)
 
-        zone["start_alert_sent"] = True
+        zone["spawn_due_marked"] = True
         return True

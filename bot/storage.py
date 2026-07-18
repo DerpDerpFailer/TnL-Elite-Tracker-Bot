@@ -153,6 +153,15 @@ class Storage:
                 zone.setdefault("found_announcement_message", None)
             version = 8
 
+        if version < 9:
+            # v9 renames start_alert_sent to spawn_due_marked: since v7 it no
+            # longer means "an alert message was sent" (that message was
+            # removed), just "the spawn-due transition has been processed
+            # for this cycle" — the old name was actively misleading.
+            for zone in self.data["zones"].values():
+                zone["spawn_due_marked"] = zone.pop("start_alert_sent", False)
+            version = 9
+
         if version != SCHEMA_VERSION:
             logger.warning(
                 "Data file version %s does not match expected %s after migrations; using as-is",

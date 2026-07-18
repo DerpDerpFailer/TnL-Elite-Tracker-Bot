@@ -330,7 +330,7 @@ class ScoutingView(discord.ui.View):
             zone_display_name = zone["display_name"]
             subzone_display_name = zone["subzones"][subzone_key]["display_name"]
             updated_embed = build_scouting_embed(
-                storage, self.zone_key, spawn_due=zone["start_alert_sent"]
+                storage, self.zone_key, spawn_due=zone["spawn_due_marked"]
             )
             refs = zone["scouting_messages"]
             primary_ref = refs[0] if refs else None
@@ -384,7 +384,7 @@ class ScoutingView(discord.ui.View):
 
             zone_display_name = zone["display_name"]
             subzone_display_name = zone["subzones"][subzone_key]["display_name"]
-            spawn_due = zone["start_alert_sent"]
+            spawn_due = zone["spawn_due_marked"]
             refs = zone["scouting_messages"]
             domain.mark_found(storage.data, self.zone_key)
             await storage.save()
@@ -556,7 +556,7 @@ class FoundAnnouncementView(discord.ui.View):
                 return
 
             zone_display_name = zone["display_name"]
-            spawn_due = zone["start_alert_sent"]
+            spawn_due = zone["spawn_due_marked"]
             refs = zone["scouting_messages"]
             zone["found_this_cycle"] = False
             zone["found_announcement_message"] = None

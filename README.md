@@ -301,7 +301,7 @@ Top-level JSON structure:
 
 ```jsonc
 {
-  "version": 8,
+  "version": 9,
   "config": {
     "channel_id": null,
     "alert_channel_id": null,
@@ -320,7 +320,7 @@ Top-level JSON structure:
       "last_kill_subzone": null,
       "spawn_at": null,
       "pre_alert_sent": false,
-      "start_alert_sent": false,
+      "spawn_due_marked": false,
       "found_this_cycle": false,
       "subzones": {
         "urstella-fields": {
