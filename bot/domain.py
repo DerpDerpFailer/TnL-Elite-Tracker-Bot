@@ -29,6 +29,7 @@ __all__ = [
     "add_subzone",
     "remove_subzone",
     "toggle_scout",
+    "mark_found",
     "kill_intervals_minutes",
     "sync_default_zones",
 ]
@@ -38,6 +39,7 @@ def _reset_scouting_state(zone: ZoneState) -> None:
     for subzone in zone["subzones"].values():
         subzone["scouts"] = []
     zone["scouting_messages"] = []
+    zone["found_this_cycle"] = False
 
 
 def _snapshot_for_undo(data: RootData, zone_key: str) -> None:
@@ -55,7 +57,12 @@ def _append_history(data: RootData, zone_key: str, entry: HistoryEntry) -> None:
 
 
 def record_kill(
-    data: RootData, zone_key: str, timestamp: float, user_id: int, user_name: str
+    data: RootData,
+    zone_key: str,
+    timestamp: float,
+    user_id: int,
+    user_name: str,
+    subzone_display_name: str | None = None,
 ) -> ZoneState:
     _snapshot_for_undo(data, zone_key)
 
@@ -64,6 +71,7 @@ def record_kill(
 
     zone["last_kill_at"] = timestamp
     zone["last_kill_by"] = user_name
+    zone["last_kill_subzone"] = subzone_display_name
     zone["spawn_at"] = spawn_at
     zone["pre_alert_sent"] = False
     zone["start_alert_sent"] = False
@@ -167,6 +175,10 @@ def add_subzone(data: RootData, zone_key: str, subzone_key: str, display_name: s
 
 def remove_subzone(data: RootData, zone_key: str, subzone_key: str) -> None:
     data["zones"][zone_key]["subzones"].pop(subzone_key, None)
+
+
+def mark_found(data: RootData, zone_key: str) -> None:
+    data["zones"][zone_key]["found_this_cycle"] = True
 
 
 def toggle_scout(data: RootData, zone_key: str, subzone_key: str, user_id: int) -> bool:

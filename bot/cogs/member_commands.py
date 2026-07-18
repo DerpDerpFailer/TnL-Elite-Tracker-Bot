@@ -135,6 +135,7 @@ class MemberCommands(commands.Cog):
                         int(zone["last_kill_at"]),
                         int(zone["spawn_at"]),
                         reported_by,
+                        zone["last_kill_subzone"],
                     )
                 )
 

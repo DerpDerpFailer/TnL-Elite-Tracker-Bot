@@ -41,6 +41,7 @@ def build_status_embed(storage: Storage, now: float) -> discord.Embed:
                 int(zone["last_kill_at"]),
                 int(zone["spawn_at"]),
                 zone["cooldown_minutes"],
+                zone["last_kill_subzone"],
             )
         embed.add_field(name=field_name, value=field_value, inline=False)
     embed.add_field(name="​", value=strings.status_embed_updated_line(int(now)), inline=False)

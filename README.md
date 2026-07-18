@@ -3,7 +3,8 @@
 A single-guild Discord bot that tracks Elite PvP boss respawn timers for
 **Throne and Liberty**. Members log kills and no-shows, the bot computes the
 next expected spawn time per zone, keeps a live status embed up to date, and
-posts pre-spawn / spawn-time alerts with the zone's map attached.
+posts a per-sub-zone scouting alert (with the zone's map attached) that
+updates in place as the boss is found and killed.
 
 State is a single JSON file (`/data/elite.json`), written atomically with a
 `.bak` copy kept on every write — there is no database.
@@ -27,27 +28,35 @@ State is a single JSON file (`/data/elite.json`), written atomically with a
 - A single embed message (the "perpetual message") in a configured channel
   shows live status for every zone, using Discord's native `<t:...>`
   timestamps so each member sees times in their own timezone.
-- A background task checks every 30 seconds whether a pre-alert or
-  spawn-time alert is due for any zone, and sends it (with the zone's map
-  image attached, if one was uploaded) exactly once per spawn.
-- The pre-alert gives every sub-zone its own row with two buttons: **"Scouting
-  `<sub-zone>`"** toggles that member in/out of the sub-zone's scout list (the
-  embed updates live for everyone, plus that sub-zone's own map image sent
-  ephemerally if one was uploaded), and **"Elite Found"** announces the boss
-  was located there. Clicking "Elite Found" disables every scouting/found
-  button for the whole zone (across every message it spans), marks the
-  shared embed's title "... Scouting - Done" with a bold "Elite found at
-  `<sub-zone>`" note, and posts a new pinged announcement embed with that
-  sub-zone's map attached if one was uploaded. Discord caps a message at 5
-  button rows, so zones with more than 5 sub-zones get extra messages for
-  the rest of the buttons — all of them stay in sync with the same shared
-  embed on the first message.
-- The spawn-time alert includes an **"Elite killed" button**: anyone can
-  click it to log the kill on the spot (equivalent to `/elite-killed` with no
-  time argument) without typing a command. The button disables itself and
-  shows who confirmed it once clicked.
-- Both button types are persistent — they keep working on old alert messages
-  even after a bot restart.
+- A background task checks every 30 seconds whether a pre-alert is due, or
+  whether the spawn time has been reached, for any zone — but only the
+  pre-alert ever posts a *new* message. Reaching the spawn time just silently
+  edits that same scouting message in place, to keep the number of embeds
+  down to one alert cycle per spawn (see below).
+- The pre-alert gives every sub-zone its own row with two buttons:
+  **"Scouting `<sub-zone>`"** toggles that member in/out of the sub-zone's
+  scout list (the embed updates live for everyone, plus that sub-zone's own
+  map image sent ephemerally if one was uploaded), and **"Elite Found"**
+  announces the boss was located there — it disables Scouting/Elite Found
+  for the whole zone (across every message it spans) since there's no more
+  need to keep scouting once it's found, marks the shared embed's title
+  "... Scouting - Done" with a bold "Elite found at `<sub-zone>`" note, and
+  posts a new pinged announcement embed with that sub-zone's map attached if
+  one was uploaded.
+- Once the spawn time is reached, that same scouting message is edited
+  in-place (title → "... Scouting — Spawn Due", no new message, no ping) to
+  add a third button per row: **"Elite killed"**. Scouting/Elite Found stay
+  active (the boss may not spawn exactly on schedule), but clicking "Elite
+  killed" — on whichever sub-zone row it actually died in — disables every
+  button for the zone for good, records that sub-zone against the kill (see
+  `/elite-status` and the perpetual message), and resets the timer. It's the
+  button equivalent of `/elite-killed`, with no separate confirmation embed.
+- Discord caps a message at 5 button rows, so zones with more than 5
+  sub-zones get extra messages for the rest of the buttons — all of them
+  stay in sync with the same shared embed on the first message, and all get
+  the "Elite killed" button added at spawn time too.
+- All buttons are persistent — they keep working on old alert messages even
+  after a bot restart.
 - All game-side values (cooldowns, zones, sub-zones, map images, channel,
   alert role, timezone, admin role) are configured through `/elite-config` —
   the game is patched weekly, so nothing here should require touching code or
@@ -283,7 +292,7 @@ Top-level JSON structure:
 
 ```jsonc
 {
-  "version": 6,
+  "version": 7,
   "config": {
     "channel_id": null,
     "alert_channel_id": null,
@@ -299,9 +308,11 @@ Top-level JSON structure:
       "cooldown_minutes": 240,
       "last_kill_at": null,
       "last_kill_by": null,
+      "last_kill_subzone": null,
       "spawn_at": null,
       "pre_alert_sent": false,
       "start_alert_sent": false,
+      "found_this_cycle": false,
       "subzones": {
         "urstella-fields": {
           "display_name": "Urstella Fields",
@@ -322,13 +333,17 @@ Top-level JSON structure:
 
 `spawn_at` is the single expected respawn timestamp (`last_kill_at` +
 cooldown) — there's no window around it, the boss is simply expected right
-then. A sub-zone's `scouts` list holds the Discord user IDs currently
-scouting it for that pending spawn; it's cleared automatically whenever a
-new kill or no-show recalculates `spawn_at`. `scouting_messages` is a list of
-`{"channel_id", "message_id", "subzone_keys"}`, one entry per scouting
-message sent this cycle (the first holds the live embed) — this is what lets
-"Elite Found" reach and disable every scouting/found button for the zone,
-not just the ones on the message that was clicked.
+then. `last_kill_subzone` records which sub-zone the last kill happened in
+(via a per-row "Elite killed" button), when known. A sub-zone's `scouts`
+list holds the Discord user IDs currently scouting it for that pending
+spawn; it's cleared automatically whenever a new kill or no-show
+recalculates `spawn_at`, along with `found_this_cycle` (set once "Elite
+Found" is clicked, so the spawn-time edit doesn't overwrite that state) and
+`scouting_messages` — a list of `{"channel_id", "message_id",
+"subzone_keys"}`, one entry per scouting message sent this cycle (the first
+holds the live embed) — this is what lets "Elite Found"/"Elite killed"
+reach and update every message for the zone, not just the one that was
+clicked.
 
 Map images live alongside it in the named Docker volume: region-level maps
 at `/data/maps/<zone>.png`, sub-zone maps at `/data/maps/<zone>__<subzone>.png`.

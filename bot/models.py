@@ -38,9 +38,11 @@ class ZoneState(TypedDict):
     cooldown_minutes: int
     last_kill_at: float | None
     last_kill_by: str | None
+    last_kill_subzone: str | None
     spawn_at: float | None
     pre_alert_sent: bool
     start_alert_sent: bool
+    found_this_cycle: bool
     subzones: dict[str, SubzoneState]
     scouting_messages: list[ScoutingMessageRef]
 
@@ -89,9 +91,11 @@ def build_zone_state(
         cooldown_minutes=cooldown_minutes,
         last_kill_at=None,
         last_kill_by=None,
+        last_kill_subzone=None,
         spawn_at=None,
         pre_alert_sent=False,
         start_alert_sent=False,
+        found_this_cycle=False,
         subzones={
             slugify(name): build_subzone_state(name) for name in (subzone_names or [])
         },

@@ -132,6 +132,17 @@ class Storage:
                     zone.setdefault("scouting_messages", [])
             version = 6
 
+        if version < 7:
+            # v7 replaces the separate "spawn arrived" alert message with a
+            # silent edit of the existing scouting message(s), adding a
+            # per-sub-zone "Elite killed" button (which also records which
+            # sub-zone the kill happened in) and a found_this_cycle flag so
+            # that edit doesn't clobber an already-found state.
+            for zone in self.data["zones"].values():
+                zone.setdefault("last_kill_subzone", None)
+                zone.setdefault("found_this_cycle", False)
+            version = 7
+
         if version != SCHEMA_VERSION:
             logger.warning(
                 "Data file version %s does not match expected %s after migrations; using as-is",

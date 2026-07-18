@@ -51,10 +51,16 @@ def zone_field_value_no_data(cooldown_minutes: int) -> str:
     )
 
 
-def zone_field_value(last_kill_ts: int, spawn_at_ts: int, cooldown_minutes: int) -> str:
+def zone_field_value(
+    last_kill_ts: int,
+    spawn_at_ts: int,
+    cooldown_minutes: int,
+    last_kill_subzone: str | None = None,
+) -> str:
+    subzone_note = f" in **{last_kill_subzone}**" if last_kill_subzone else ""
     return (
         f"Respawning: <t:{spawn_at_ts}:R>\n"
-        f"Last killed: <t:{last_kill_ts}:F> (<t:{last_kill_ts}:R>)\n"
+        f"Last killed: <t:{last_kill_ts}:F> (<t:{last_kill_ts}:R>){subzone_note}\n"
         f"Spawn time: <t:{spawn_at_ts}:F>\n"
         f"Cooldown: {_format_duration_words(cooldown_minutes)}"
     )
@@ -79,6 +85,14 @@ def pre_alert_description(spawn_at_ts: int, offset_minutes: int) -> str:
 
 def scouting_title(display_name: str) -> str:
     return f"\U0001f526 {display_name} Scouting"
+
+
+def scouting_title_spawn_due(display_name: str) -> str:
+    return f"\U0001f6a8 {display_name} Scouting — Spawn Due"
+
+
+def scouting_spawn_due_description(spawn_at_ts: int) -> str:
+    return f"Spawn time was <t:{spawn_at_ts}:t> (<t:{spawn_at_ts}:R>) — should be up now!"
 
 
 def scouting_field_value(mentions: list[str]) -> str:
@@ -121,19 +135,13 @@ def found_confirmed(subzone_display_name: str) -> str:
     return f"Marked **{subzone_display_name}** as found — announcement posted."
 
 
-def start_alert_title(display_name: str) -> str:
-    return f"\U0001f6a8 {display_name} spawn time has arrived"
-
-
-def start_alert_description(spawn_at_ts: int) -> str:
-    return f"Spawn possible **now**: <t:{spawn_at_ts}:t> (<t:{spawn_at_ts}:R>)"
-
-
 KILL_BUTTON_LABEL = "Elite killed"
 
 
-def kill_button_confirmed_label(user_name: str) -> str:
-    return f"✅ Killed by {user_name}"
+def scouting_kill_note(subzone_display_name: str | None) -> str:
+    return (
+        f"**Elite killed at {subzone_display_name}**" if subzone_display_name else "**Elite killed**"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -194,9 +202,16 @@ def status_row_no_data(display_name: str) -> str:
     return f"**{display_name}**: no kill recorded yet"
 
 
-def status_row(display_name: str, last_kill_ts: int, spawn_at_ts: int, reported_by: str) -> str:
+def status_row(
+    display_name: str,
+    last_kill_ts: int,
+    spawn_at_ts: int,
+    reported_by: str,
+    last_kill_subzone: str | None = None,
+) -> str:
+    subzone_note = f" in **{last_kill_subzone}**" if last_kill_subzone else ""
     return (
-        f"**{display_name}**: last kill <t:{last_kill_ts}:R> by {reported_by} | "
+        f"**{display_name}**: last kill <t:{last_kill_ts}:R>{subzone_note} by {reported_by} | "
         f"next spawn <t:{spawn_at_ts}:t> (<t:{spawn_at_ts}:R>)"
     )
 

@@ -16,7 +16,6 @@ from bot.config import load_env_config
 from bot.perpetual_message import PerpetualMessageManager
 from bot.scouting import ScoutingView, chunk_subzone_keys
 from bot.storage import Storage
-from bot.views import KillButtonView
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +41,17 @@ class EliteBot(commands.Bot):
     async def setup_hook(self) -> None:
         self.storage.load_or_seed()
 
-        # Re-register one persistent "Elite killed" button view and one
-        # persistent scouting-buttons view per zone/chunk so clicks on alert
-        # messages posted before this restart keep routing correctly.
+        # Re-register a persistent scouting-buttons view per zone/chunk, in
+        # both the pre-alert (no kill button) and spawn-due/found (with kill
+        # button) shapes, so clicks on alert messages posted before this
+        # restart keep routing correctly regardless of which phase they're
+        # in. A zero-sub-zone zone still gets one registration for its
+        # generic (no-sub-zone) kill button.
         for zone_key, zone in self.storage.data["zones"].items():
-            self.add_view(KillButtonView(self, zone_key))
-            for chunk in chunk_subzone_keys(zone):
+            chunks = chunk_subzone_keys(zone) or [[]]
+            for chunk in chunks:
                 self.add_view(ScoutingView(self, zone_key, chunk))
+                self.add_view(ScoutingView(self, zone_key, chunk, show_kill_button=True))
 
         for extension in EXTENSIONS:
             await self.load_extension(extension)
