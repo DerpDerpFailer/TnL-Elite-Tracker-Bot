@@ -2,12 +2,34 @@ from __future__ import annotations
 
 from bot.constants import DEFAULT_SUBZONES, DEFAULT_ZONES
 from bot.default_maps import (
+    DEFAULT_IMAGES_DIR,
     IMAGE_MAP,
     restore_bundled_default,
     restore_bundled_defaults_for_zone,
     seed_default_maps,
 )
 from bot.slugs import slugify
+
+_IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg")
+
+
+def test_image_map_matches_the_actual_images_directory():
+    """Guards against images/ drifting out of sync with IMAGE_MAP — a file
+    renamed, added or removed there without updating the table (or vice
+    versa) would otherwise only surface as a silently-missing/orphaned map,
+    not a test failure."""
+    real_files = {
+        f.name for f in DEFAULT_IMAGES_DIR.iterdir() if f.suffix.lower() in _IMAGE_SUFFIXES
+    }
+    mapped_files = set(IMAGE_MAP.keys())
+
+    assert not (mapped_files - real_files), (
+        f"IMAGE_MAP references files missing from {DEFAULT_IMAGES_DIR}: "
+        f"{mapped_files - real_files}"
+    )
+    assert not (real_files - mapped_files), (
+        f"{DEFAULT_IMAGES_DIR} has image(s) not listed in IMAGE_MAP: {real_files - mapped_files}"
+    )
 
 
 def test_image_map_only_references_known_zones_and_subzones():

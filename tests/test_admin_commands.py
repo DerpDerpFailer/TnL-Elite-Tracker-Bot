@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import discord
+
 from bot.cogs.admin_commands import AdminConfigGroup
 from tests.fakes import FakeInteraction
 
 
 def _cog(bot) -> AdminConfigGroup:
     return AdminConfigGroup(bot)
+
+
+class _FakeTooLargeResponse:
+    status = 413
+    reason = "Payload Too Large"
+    headers = {}
 
 
 class TestPreviewMap:
@@ -55,6 +63,31 @@ class TestPreviewMap:
 
         content, _ = interaction.response.send_message_calls[0]
         assert content == "Unknown zone. Pick one from the autocomplete list."
+
+    async def test_reports_a_graceful_error_when_the_upload_fails(self, bot, tmp_path, monkeypatch):
+        monkeypatch.setattr("bot.cogs.admin_commands.MAPS_DIR", tmp_path)
+        (tmp_path / "laslan.png").write_bytes(b"fake-png-bytes")
+        cog = _cog(bot)
+        interaction = FakeInteraction()
+
+        real_send_message = interaction.response.send_message
+        calls = {"n": 0}
+
+        async def flaky_send_message(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise discord.HTTPException(_FakeTooLargeResponse(), "Payload too large")
+            return await real_send_message(*args, **kwargs)
+
+        interaction.response.send_message = flaky_send_message
+
+        await cog.preview_map.callback(cog, interaction, "laslan", None)
+
+        # the first (failed) attempt carried the embed/file; the fallback is
+        # a plain text error, proving the command didn't just crash
+        content, kwargs = interaction.response.send_message_calls[0]
+        assert "embed" not in kwargs
+        assert "too large" in content.lower()
 
     async def test_unknown_subzone_reports_error(self, bot, tmp_path, monkeypatch):
         monkeypatch.setattr("bot.cogs.admin_commands.MAPS_DIR", tmp_path)
@@ -107,6 +140,29 @@ class TestPreviewZone:
         second_content, second_kwargs = interaction.followup.sent[0]
         assert len(second_kwargs["embeds"]) == 1
         assert second_content is None  # only the first chunk carries the header
+
+    async def test_reports_a_graceful_error_when_a_chunk_upload_fails(
+        self, bot, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr("bot.cogs.admin_commands.MAPS_DIR", tmp_path)
+        cog = _cog(bot)
+        interaction = FakeInteraction()
+
+        real_send_message = interaction.response.send_message
+
+        async def flaky_send_message(*args, **kwargs):
+            if "embeds" in kwargs:
+                raise discord.HTTPException(_FakeTooLargeResponse(), "Payload too large")
+            return await real_send_message(*args, **kwargs)
+
+        interaction.response.send_message = flaky_send_message
+
+        # syleus has no sub-zones, so this is a single-chunk, single-embed call
+        await cog.preview_zone.callback(cog, interaction, "syleus")
+
+        content, kwargs = interaction.response.send_message_calls[0]
+        assert "embeds" not in kwargs
+        assert "too large" in content.lower()
 
     async def test_unknown_zone_reports_error(self, bot, tmp_path, monkeypatch):
         monkeypatch.setattr("bot.cogs.admin_commands.MAPS_DIR", tmp_path)

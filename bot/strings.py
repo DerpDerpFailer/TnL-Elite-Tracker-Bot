@@ -399,6 +399,13 @@ def config_map_missing(title: str) -> str:
     return f"No map uploaded yet for **{title}**."
 
 
+def config_preview_failed(title: str) -> str:
+    return (
+        f"Failed to send the map preview for **{title}** — it may be too large for Discord "
+        "to upload. Check the bot logs for details."
+    )
+
+
 def config_reset_maps_done(zone_display_name: str, restored: int, cleared: int) -> str:
     base = f"Reset maps for **{zone_display_name}**: {restored} restored to the bundled default"
     if cleared:

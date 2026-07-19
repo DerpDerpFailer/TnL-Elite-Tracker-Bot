@@ -423,12 +423,23 @@ class AdminConfigGroup(app_commands.Group):
                     embed.description = strings.MAP_NOT_UPLOADED_NOTE
                 embeds.append(embed)
 
-            await send_reply(
-                interaction,
-                header if chunk_start == 0 else None,
-                embeds=embeds,
-                files=files,
-            )
+            try:
+                await send_reply(
+                    interaction,
+                    header if chunk_start == 0 else None,
+                    embeds=embeds,
+                    files=files,
+                )
+            except discord.HTTPException as exc:
+                logger.warning(
+                    "Failed to send map preview chunk for %s: %s", zone_state["display_name"], exc
+                )
+                try:
+                    await send_ephemeral(
+                        interaction, strings.config_preview_failed(zone_state["display_name"])
+                    )
+                except discord.HTTPException:
+                    pass
 
     @app_commands.command(
         name="preview-map", description="Show the map image for a zone or one specific sub-zone"
@@ -463,7 +474,14 @@ class AdminConfigGroup(app_commands.Group):
         embed = discord.Embed(title=title, color=discord.Color.blurple())
         embed.set_image(url=f"attachment://{map_path.name}")
         file = discord.File(map_path, filename=map_path.name)
-        await send_reply(interaction, embed=embed, file=file)
+        try:
+            await send_reply(interaction, embed=embed, file=file)
+        except discord.HTTPException as exc:
+            logger.warning("Failed to send map preview for %s: %s", title, exc)
+            try:
+                await send_ephemeral(interaction, strings.config_preview_failed(title))
+            except discord.HTTPException:
+                pass
 
     @app_commands.command(
         name="reset-maps",
