@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from bot.interactions import EPHEMERAL_TTL_SECONDS, send_ephemeral
+from bot.interactions import EPHEMERAL_TTL_SECONDS, send_ephemeral, send_reply
 from tests.fakes import FakeInteraction
 
 
@@ -34,3 +34,28 @@ async def test_send_ephemeral_passes_through_extra_kwargs():
 
     _, kwargs = interaction.response.send_message_calls[0]
     assert kwargs["embed"] == "fake-embed"
+
+
+async def test_send_reply_defaults_to_non_ephemeral_with_no_auto_delete():
+    interaction = FakeInteraction()
+    await send_reply(interaction, "public message", embed="fake-embed")
+
+    content, kwargs = interaction.response.send_message_calls[0]
+    assert content == "public message"
+    assert kwargs["ephemeral"] is False
+    assert kwargs["delete_after"] is None
+    assert kwargs["embed"] == "fake-embed"
+
+
+async def test_send_reply_via_followup_does_not_schedule_a_delete():
+    interaction = FakeInteraction()
+    await interaction.response.defer()
+
+    await send_reply(interaction, "public followup")
+
+    content, kwargs = interaction.followup.sent[0]
+    assert content == "public followup"
+    assert kwargs["ephemeral"] is False
+    message = interaction.followup.messages[0]
+    assert message.delete_delays == []
+    assert message.deleted is False

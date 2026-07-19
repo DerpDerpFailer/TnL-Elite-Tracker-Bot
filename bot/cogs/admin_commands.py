@@ -21,7 +21,7 @@ from discord import app_commands
 from bot import domain, strings
 from bot.autocomplete import subzone_autocomplete, zone_autocomplete
 from bot.constants import MAPS_DIR
-from bot.interactions import send_ephemeral
+from bot.interactions import send_ephemeral, send_reply
 from bot.timeutil import get_zoneinfo, parse_duration_to_minutes
 
 if TYPE_CHECKING:
@@ -422,7 +422,7 @@ class AdminConfigGroup(app_commands.Group):
                     embed.description = strings.MAP_NOT_UPLOADED_NOTE
                 embeds.append(embed)
 
-            await send_ephemeral(
+            await send_reply(
                 interaction,
                 header if chunk_start == 0 else None,
                 embeds=embeds,
@@ -462,7 +462,7 @@ class AdminConfigGroup(app_commands.Group):
         embed = discord.Embed(title=title, color=discord.Color.blurple())
         embed.set_image(url=f"attachment://{map_path.name}")
         file = discord.File(map_path, filename=map_path.name)
-        await send_ephemeral(interaction, embed=embed, file=file)
+        await send_reply(interaction, embed=embed, file=file)
 
     @app_commands.command(
         name="repost",

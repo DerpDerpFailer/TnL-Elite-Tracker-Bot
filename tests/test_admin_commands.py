@@ -21,6 +21,7 @@ class TestPreviewMap:
         assert kwargs["embed"].title == "Laslan"
         assert kwargs["embed"].image.url == "attachment://laslan.png"
         assert kwargs["file"].filename == "laslan.png"
+        assert kwargs["ephemeral"] is False  # visible to the whole channel
 
     async def test_shows_a_subzone_map_when_it_exists(self, bot, tmp_path, monkeypatch):
         monkeypatch.setattr("bot.cogs.admin_commands.MAPS_DIR", tmp_path)
@@ -88,6 +89,7 @@ class TestPreviewZone:
         assert by_title["Frozen Nightlands"].image.url == "attachment://nix__frozen-nightlands.png"
         assert by_title["Border Zone"].description == "No map uploaded yet."
         assert len(kwargs["files"]) == 2
+        assert kwargs["ephemeral"] is False  # visible to the whole channel
 
     async def test_chunks_across_messages_when_more_than_ten_images(
         self, bot, tmp_path, monkeypatch
