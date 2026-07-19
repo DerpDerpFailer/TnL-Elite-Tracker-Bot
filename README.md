@@ -231,6 +231,7 @@ repo is checked out into an ephemeral location).
 | `/elite-undo zone` | Undo the last kill/no-show entry for that zone. |
 | `/elite-status` | Ephemeral table of every zone: last kill, next spawn time, who reported it. |
 | `/elite-stats zone` | Up to the last 10 observed kill-to-kill intervals and their average, flagged if it drifts >15 min from the configured cooldown. |
+| `/elite-zones` | Nested list of every tracked zone and its sub-zones. |
 
 Examples:
 
@@ -242,6 +243,7 @@ Examples:
 /elite-undo zone:Syleus
 /elite-status
 /elite-stats zone:Nix
+/elite-zones
 ```
 
 ### Admin commands (`/elite-config ...`)

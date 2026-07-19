@@ -140,6 +140,26 @@ class MemberCommands(commands.Cog):
         await send_ephemeral(interaction, embed=embed)
 
     @app_commands.command(
+        name="elite-zones", description="List every tracked zone and its sub-zones"
+    )
+    async def elite_zones(self, interaction: discord.Interaction) -> None:
+        storage = self.bot.storage
+        entries = [
+            strings.zone_list_entry(
+                zone["display_name"],
+                [subzone["display_name"] for subzone in zone["subzones"].values()],
+            )
+            for zone in storage.data["zones"].values()
+        ]
+
+        embed = discord.Embed(
+            title=strings.ZONE_LIST_TITLE,
+            description="\n".join(entries) if entries else strings.ZONE_LIST_EMPTY,
+            color=discord.Color.blurple(),
+        )
+        await send_ephemeral(interaction, embed=embed)
+
+    @app_commands.command(
         name="elite-stats",
         description="Show observed kill intervals for a zone vs. its configured cooldown",
     )

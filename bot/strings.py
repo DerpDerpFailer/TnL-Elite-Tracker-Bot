@@ -260,6 +260,20 @@ def stats_deviation_note(delta_minutes: float) -> str:
 
 
 # ---------------------------------------------------------------------------
+# /elite-zones
+# ---------------------------------------------------------------------------
+
+ZONE_LIST_TITLE = "Zones & Sub-zones"
+ZONE_LIST_EMPTY = "No zones configured."
+
+
+def zone_list_entry(display_name: str, subzone_names: list[str]) -> str:
+    lines = [f"* {display_name}"]
+    lines.extend(f"  * {name}" for name in subzone_names)
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Shared errors
 # ---------------------------------------------------------------------------
 
