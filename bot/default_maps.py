@@ -87,6 +87,19 @@ IMAGE_MAP: dict[str, tuple[str, str | None]] = {
 }
 
 
+def _target_name(zone_key: str, subzone_name: str | None) -> str:
+    return f"{zone_key}.png" if subzone_name is None else f"{zone_key}__{slugify(subzone_name)}.png"
+
+
+# Reverse of IMAGE_MAP: target filename (as it lands in MAPS_DIR) -> bundled
+# source filename. Lets us find "is there a bundled default for this exact
+# zone/sub-zone" without re-deriving it from IMAGE_MAP each time.
+_TARGET_TO_SOURCE: dict[str, str] = {
+    _target_name(zone_key, subzone_name): filename
+    for filename, (zone_key, subzone_name) in IMAGE_MAP.items()
+}
+
+
 def seed_default_maps(
     images_dir: Path = DEFAULT_IMAGES_DIR, maps_dir: Path = MAPS_DIR
 ) -> list[str]:
@@ -100,10 +113,7 @@ def seed_default_maps(
     copied: list[str] = []
 
     for filename, (zone_key, subzone_name) in IMAGE_MAP.items():
-        target_name = (
-            f"{zone_key}.png" if subzone_name is None else f"{zone_key}__{slugify(subzone_name)}.png"
-        )
-        target = maps_dir / target_name
+        target = maps_dir / _target_name(zone_key, subzone_name)
         if target.exists():
             continue
 
@@ -113,6 +123,55 @@ def seed_default_maps(
             continue
 
         shutil.copyfile(source, target)
-        copied.append(target_name)
+        copied.append(target.name)
 
     return copied
+
+
+def restore_bundled_default(
+    zone_key: str,
+    subzone_key: str | None,
+    images_dir: Path = DEFAULT_IMAGES_DIR,
+    maps_dir: Path = MAPS_DIR,
+) -> bool:
+    """Deletes whatever is currently at this zone/sub-zone's map path — even
+    an admin override — and re-copies the bundled default over it. Use when
+    a stale/placeholder upload is blocking the bundled default from ever
+    being seeded (seed_default_maps never touches an existing file).
+    Returns True if a bundled default existed and was restored; False if
+    there's no bundled default for this zone/sub-zone (the target is left
+    deleted either way)."""
+    target_name = f"{zone_key}.png" if subzone_key is None else f"{zone_key}__{subzone_key}.png"
+    (maps_dir / target_name).unlink(missing_ok=True)
+
+    source_name = _TARGET_TO_SOURCE.get(target_name)
+    if source_name is None:
+        return False
+
+    source = images_dir / source_name
+    if not source.exists():
+        return False
+
+    maps_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, maps_dir / target_name)
+    return True
+
+
+def restore_bundled_defaults_for_zone(
+    zone_key: str,
+    subzone_keys: list[str],
+    images_dir: Path = DEFAULT_IMAGES_DIR,
+    maps_dir: Path = MAPS_DIR,
+) -> tuple[int, int]:
+    """Restores the zone-level map plus every given sub-zone's map. Returns
+    (restored, cleared): restored is how many had a bundled default put back
+    in place; cleared is how many had no bundled default, so the stale
+    override was simply deleted instead."""
+    restored = 0
+    cleared = 0
+    for subzone_key in (None, *subzone_keys):
+        if restore_bundled_default(zone_key, subzone_key, images_dir, maps_dir):
+            restored += 1
+        else:
+            cleared += 1
+    return restored, cleared

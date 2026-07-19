@@ -177,7 +177,10 @@ run by hand.
 It only ever fills in what's *missing*: a map already in `/data/maps` (e.g.
 one you replaced with `/elite-config map`/`submap`) is never overwritten by
 the bundled default. Those two commands remain the way to add a map for a
-custom zone/sub-zone, or to replace a bundled one with something else.
+custom zone/sub-zone, or to replace a bundled one with something else. If a
+zone already had a placeholder/test map uploaded before it had a bundled
+default, that stale file will never get auto-replaced — use
+`/elite-config reset-maps zone` to force it back to the bundled default.
 
 To add or update a bundled default yourself, drop the image into `images/`
 following the same `Zone.png`/`Zone - Sub-zone.png` naming, add the matching
@@ -296,6 +299,7 @@ finer-grained control.
 | `/elite-config submap zone subzone image` | Upload/replace the map image for one specific sub-zone, sent ephemerally to whoever clicks its "Scouting" button. |
 | `/elite-config preview-zone zone` | Show every map image for a zone (its own map plus every sub-zone's), noting any that haven't been uploaded yet — handy for checking the bundled/uploaded maps landed correctly. |
 | `/elite-config preview-map zone [subzone]` | Show the map image for one specific zone or sub-zone. |
+| `/elite-config reset-maps zone` | Delete a zone's map overrides (its own + every sub-zone's) and restore the bundled defaults. Use this if a stale/placeholder upload from before a zone had a bundled default is blocking it — `/elite-config map`/`submap` never get auto-replaced otherwise. |
 | `/elite-config repost` | Recreate the perpetual status message if it was deleted by accident, or force an immediate refresh. |
 | `/elite-config show` | Show the full current configuration (channel, roles, offset, timezone, zones with their cooldowns and sub-zone counts) in one embed. |
 
@@ -319,6 +323,7 @@ Examples:
 /elite-config submap zone:Laslan subzone:Urstella Fields image:urstella-fields.png
 /elite-config preview-zone zone:Nix
 /elite-config preview-map zone:Laslan subzone:Urstella Fields
+/elite-config reset-maps zone:Nix
 /elite-config repost
 /elite-config show
 ```

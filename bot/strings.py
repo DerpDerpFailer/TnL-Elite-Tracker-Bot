@@ -399,6 +399,13 @@ def config_map_missing(title: str) -> str:
     return f"No map uploaded yet for **{title}**."
 
 
+def config_reset_maps_done(zone_display_name: str, restored: int, cleared: int) -> str:
+    base = f"Reset maps for **{zone_display_name}**: {restored} restored to the bundled default"
+    if cleared:
+        base += f", {cleared} cleared (no bundled default exists for them)"
+    return base + "."
+
+
 def config_repost_no_channel() -> str:
     return "No channel is configured yet. Set one first with `/elite-config channel`."
 

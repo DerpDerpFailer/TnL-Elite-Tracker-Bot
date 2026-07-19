@@ -117,3 +117,38 @@ class TestPreviewZone:
 
         content, _ = interaction.response.send_message_calls[0]
         assert content == "Unknown zone. Pick one from the autocomplete list."
+
+
+class TestResetMaps:
+    async def test_delegates_to_restore_bundled_defaults_for_zone_and_reports_result(
+        self, bot, monkeypatch
+    ):
+        calls = []
+
+        def fake_restore(zone_key, subzone_keys, maps_dir=None):
+            calls.append((zone_key, sorted(subzone_keys)))
+            return (3, 1)
+
+        monkeypatch.setattr(
+            "bot.cogs.admin_commands.restore_bundled_defaults_for_zone", fake_restore
+        )
+        cog = _cog(bot)
+        interaction = FakeInteraction()
+
+        await cog.reset_maps.callback(cog, interaction, "nix")
+
+        assert calls == [
+            ("nix", ["border-zone", "entropic-tundra", "frozen-nightlands", "stillreach", "tumgir-hollow"])
+        ]
+        content, kwargs = interaction.response.send_message_calls[0]
+        assert content == "Reset maps for **Nix**: 3 restored to the bundled default, 1 cleared (no bundled default exists for them)."
+        assert kwargs["ephemeral"] is True
+
+    async def test_unknown_zone_reports_error(self, bot, monkeypatch):
+        cog = _cog(bot)
+        interaction = FakeInteraction()
+
+        await cog.reset_maps.callback(cog, interaction, "nowhere")
+
+        content, _ = interaction.response.send_message_calls[0]
+        assert content == "Unknown zone. Pick one from the autocomplete list."

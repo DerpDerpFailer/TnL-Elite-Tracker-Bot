@@ -21,6 +21,7 @@ from discord import app_commands
 from bot import domain, strings
 from bot.autocomplete import subzone_autocomplete, zone_autocomplete
 from bot.constants import MAPS_DIR
+from bot.default_maps import restore_bundled_defaults_for_zone
 from bot.interactions import send_ephemeral, send_reply
 from bot.timeutil import get_zoneinfo, parse_duration_to_minutes
 
@@ -463,6 +464,26 @@ class AdminConfigGroup(app_commands.Group):
         embed.set_image(url=f"attachment://{map_path.name}")
         file = discord.File(map_path, filename=map_path.name)
         await send_reply(interaction, embed=embed, file=file)
+
+    @app_commands.command(
+        name="reset-maps",
+        description="Delete this zone's map overrides (its own + every sub-zone's) and restore the bundled defaults",
+    )
+    @app_commands.describe(zone="Zone to reset the maps for")
+    @app_commands.autocomplete(zone=zone_autocomplete)
+    async def reset_maps(self, interaction: discord.Interaction, zone: str) -> None:
+        storage = self.bot.storage
+        if zone not in storage.data["zones"]:
+            await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
+            return
+
+        zone_state = storage.data["zones"][zone]
+        restored, cleared = restore_bundled_defaults_for_zone(
+            zone, list(zone_state["subzones"].keys()), maps_dir=MAPS_DIR
+        )
+        await send_ephemeral(
+            interaction, strings.config_reset_maps_done(zone_state["display_name"], restored, cleared)
+        )
 
     @app_commands.command(
         name="repost",
