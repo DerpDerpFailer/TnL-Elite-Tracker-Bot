@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Final, TypedDict
 
-SCHEMA_VERSION: Final[int] = 10
+SCHEMA_VERSION: Final[int] = 12
 
 DATA_DIR: Final[Path] = Path("/data")
 DATA_FILE: Final[Path] = DATA_DIR / "elite.json"
@@ -31,7 +31,6 @@ class DefaultZone(TypedDict):
 DEFAULT_ZONES: Final[dict[str, DefaultZone]] = {
     "laslan": {"display_name": "Laslan", "cooldown_minutes": 4 * 60},
     "stonegard": {"display_name": "Stonegard", "cooldown_minutes": 4 * 60},
-    "syleus": {"display_name": "Syleus", "cooldown_minutes": 4 * 60},
     "talandre": {"display_name": "Talandre", "cooldown_minutes": 6 * 60},
     "nix": {"display_name": "Nix", "cooldown_minutes": 6 * 60},
     "laslan-dungeon": {"display_name": "Laslan Dungeon", "cooldown_minutes": 4 * 60},

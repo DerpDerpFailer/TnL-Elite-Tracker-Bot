@@ -112,20 +112,20 @@ class TestRestoreBundledDefault:
         images_dir.mkdir()
         maps_dir = tmp_path / "maps"
         maps_dir.mkdir()
-        # "syleus" has no bundled default at all (see IMAGE_MAP)
-        (maps_dir / "syleus.png").write_bytes(b"stale-test-placeholder")
+        # this zone_key has no bundled default at all (see IMAGE_MAP)
+        (maps_dir / "no-such-zone.png").write_bytes(b"stale-test-placeholder")
 
-        restored = restore_bundled_default("syleus", None, images_dir, maps_dir)
+        restored = restore_bundled_default("no-such-zone", None, images_dir, maps_dir)
 
         assert restored is False
-        assert not (maps_dir / "syleus.png").exists()
+        assert not (maps_dir / "no-such-zone.png").exists()
 
     def test_is_a_noop_when_nothing_was_there_and_no_bundled_default_exists(self, tmp_path):
         images_dir = tmp_path / "images"
         images_dir.mkdir()
         maps_dir = tmp_path / "maps"
 
-        assert restore_bundled_default("syleus", None, images_dir, maps_dir) is False
+        assert restore_bundled_default("no-such-zone", None, images_dir, maps_dir) is False
 
 
 class TestRestoreBundledDefaultsForZone:

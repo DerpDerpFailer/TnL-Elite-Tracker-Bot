@@ -15,8 +15,6 @@ def test_build_seed_data_seeds_subzones_for_known_zones():
     data = build_seed_data()
     assert len(data["zones"]["laslan"]["subzones"]) == 7
     assert len(data["zones"]["stonegard"]["subzones"]) == 8
-    # syleus has no community-provided sub-zone breakdown yet
-    assert len(data["zones"]["syleus"]["subzones"]) == 0
 
 
 class TestZonePhase:

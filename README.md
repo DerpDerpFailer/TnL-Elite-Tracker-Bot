@@ -17,6 +17,7 @@ State is a single JSON file (`/data/elite.json`), written atomically with a
 - [Local development](#local-development)
 - [Running tests](#running-tests)
 - [Pre-configured zones, sub-zones and maps](#pre-configured-zones-sub-zones-and-maps)
+- [Fallback timer sync](#fallback-timer-sync)
 - [Deploying with Portainer](#deploying-with-portainer)
 - [Updating the bot](#updating-the-bot)
 - [Command reference](#command-reference)
@@ -189,6 +190,30 @@ entry to `IMAGE_MAP` in `bot/default_maps.py`, and commit both.
 Use `/elite-config preview-zone`/`preview-map` (see below) to visually verify
 maps landed correctly after a deploy.
 
+## Fallback timer sync
+
+**Off by default.** When enabled, and a zone's spawn time is missing or
+overdue by a configurable threshold, the bot checks
+[mmopartybuilder.eu](https://mmopartybuilder.eu)'s community boss-timer maps
+(one per PvP world) for a more recent kill, and adopts it if found — same
+effect as `/elite-killed`, just automatic.
+
+This talks to an internal API of that site, not a published/documented
+integration, so it's built to fail completely silently: any network error,
+timeout, or unexpected response shape is caught and logged, never surfaced
+to users and never blocking anything else the bot does. It's also rate-
+limited to at most once every 5 minutes per zone while that zone stays
+stale, so a zone nobody reports for hours doesn't hammer that site
+indefinitely.
+
+| Command | Description |
+|---|---|
+| `/elite-config fallback-enabled enabled` | Turn fallback sync on/off. |
+| `/elite-config fallback-server server` | Which PvP world to check: Sacred, Sophia, Indomitable, Usurper, or Fearless. |
+| `/elite-config fallback-threshold minutes` | How overdue/missing a zone's timer must be before it's checked (default 5). |
+| `/elite-config fallback-sync zone` | Force an immediate check for one zone, regardless of the settings above. |
+| `/elite-config fallback-sync-all` | Force an immediate check for every zone. |
+
 ## Deploying with Portainer
 
 The bot is deployed as a **Portainer Stack of type "Repository"**, pointed at
@@ -267,7 +292,7 @@ Examples:
 /elite-killed zone:Nix heure:21:45
 /elite-killed zone:Talandre heure:14/07 09:10
 /elite-noshow zone:Stonegard
-/elite-undo zone:Syleus
+/elite-undo zone:Talandre
 /elite-status
 /elite-stats zone:Nix
 /elite-zones
@@ -291,7 +316,7 @@ finer-grained control.
 | `/elite-config timezone tz` | IANA timezone used to interpret manual kill times, e.g. `Europe/Paris`. |
 | `/elite-config map zone image` | Upload/replace a zone's region-level map (PNG/JPG), attached to alerts. |
 | `/elite-config zone-add nom cooldown` | Add a new zone. |
-| `/elite-config sync-zones` | Add any built-in default zone (Laslan/Stonegard/Syleus/Talandre/Nix + dungeons, with their sub-zones) that isn't already tracked on this server. Only adds missing zones — never touches ones that already exist, even if their cooldown differs from the default. Use this after an update adds new default zones/sub-zones to the code, since the seed only runs on a brand-new `/data/elite.json`. |
+| `/elite-config sync-zones` | Add any built-in default zone (Laslan/Stonegard/Talandre/Nix + dungeons, with their sub-zones) that isn't already tracked on this server. Only adds missing zones — never touches ones that already exist, even if their cooldown differs from the default. Use this after an update adds new default zones/sub-zones to the code, since the seed only runs on a brand-new `/data/elite.json`. |
 | `/elite-config zone-remove zone` | Remove a zone, its history, its sub-zones and their maps. |
 | `/elite-config zone-reset zone` | Clear a zone's last kill, current spawn time and history — keeps its cooldown, map and configured sub-zones. Useful to wipe test data or fix a bad entry beyond what `/elite-undo` can revert (it only undoes one step). |
 | `/elite-config subzone-add zone nom` | Add a scouting sub-zone to a zone. |
@@ -300,6 +325,11 @@ finer-grained control.
 | `/elite-config preview-zone zone` | Show every map image for a zone (its own map plus every sub-zone's), noting any that haven't been uploaded yet — handy for checking the bundled/uploaded maps landed correctly. |
 | `/elite-config preview-map zone [subzone]` | Show the map image for one specific zone or sub-zone. |
 | `/elite-config reset-maps zone` | Delete a zone's map overrides (its own + every sub-zone's) and restore the bundled defaults. Use this if a stale/placeholder upload from before a zone had a bundled default is blocking it — `/elite-config map`/`submap` never get auto-replaced otherwise. |
+| `/elite-config fallback-enabled enabled` | Turn the [mmopartybuilder.eu fallback timer sync](#fallback-timer-sync) on/off (off by default). |
+| `/elite-config fallback-server server` | Which PvP world the fallback sync checks. |
+| `/elite-config fallback-threshold minutes` | How overdue/missing a zone's timer must be before fallback sync checks it. |
+| `/elite-config fallback-sync zone` | Force an immediate fallback check for one zone. |
+| `/elite-config fallback-sync-all` | Force an immediate fallback check for every zone. |
 | `/elite-config repost` | Recreate the perpetual status message if it was deleted by accident, or force an immediate refresh. |
 | `/elite-config show` | Show the full current configuration (channel, roles, offset, timezone, zones with their cooldowns and sub-zone counts) in one embed. |
 
@@ -324,6 +354,11 @@ Examples:
 /elite-config preview-zone zone:Nix
 /elite-config preview-map zone:Laslan subzone:Urstella Fields
 /elite-config reset-maps zone:Nix
+/elite-config fallback-enabled enabled:True
+/elite-config fallback-server server:Sacred
+/elite-config fallback-threshold minutes:5
+/elite-config fallback-sync zone:Nix
+/elite-config fallback-sync-all
 /elite-config repost
 /elite-config show
 ```
@@ -331,13 +366,12 @@ Examples:
 ## Data file layout
 
 Seeded automatically on first boot if `/data/elite.json` doesn't exist, with
-the eight zones the guild currently tracks:
+the seven zones the guild currently tracks:
 
 | Zone | Default cooldown |
 |---|---|
 | Laslan | 4h |
 | Stonegard | 4h |
-| Syleus | 4h |
 | Talandre | 6h |
 | Nix | 6h |
 | Laslan Dungeon | 4h |

@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from zoneinfo import ZoneInfoNotFoundError
 
 import discord
@@ -22,6 +22,7 @@ from bot import domain, strings
 from bot.autocomplete import subzone_autocomplete, zone_autocomplete
 from bot.constants import MAPS_DIR
 from bot.default_maps import restore_bundled_defaults_for_zone
+from bot.fallback import SERVER_DISPLAY_NAMES, FallbackSyncResult, sync_zone_from_fallback
 from bot.interactions import send_ephemeral, send_reply
 from bot.timeutil import get_zoneinfo, parse_duration_to_minutes
 
@@ -180,6 +181,52 @@ class AdminConfigGroup(app_commands.Group):
             await storage.save()
 
         await send_ephemeral(interaction, strings.config_timezone_updated(tz))
+
+    @app_commands.command(
+        name="fallback-enabled",
+        description="Enable/disable checking mmopartybuilder.eu for stale zone timers",
+    )
+    @app_commands.describe(enabled="Whether to check mmopartybuilder.eu for missing/overdue timers")
+    async def fallback_enabled(self, interaction: discord.Interaction, enabled: bool) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            storage.data["config"]["fallback_enabled"] = enabled
+            await storage.save()
+
+        await send_ephemeral(interaction, strings.config_fallback_enabled_updated(enabled))
+
+    @app_commands.command(
+        name="fallback-server", description="Set which PvP world the fallback timer sync checks"
+    )
+    @app_commands.describe(server="PvP world to pull timers from")
+    async def fallback_server(
+        self,
+        interaction: discord.Interaction,
+        server: Literal["sacred", "sophia", "indomitable", "usurper", "fearless"],
+    ) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            storage.data["config"]["fallback_server"] = server
+            await storage.save()
+
+        await send_ephemeral(
+            interaction, strings.config_fallback_server_updated(SERVER_DISPLAY_NAMES[server])
+        )
+
+    @app_commands.command(
+        name="fallback-threshold",
+        description="Set how overdue a zone's timer must be before fallback sync checks it",
+    )
+    @app_commands.describe(minutes="Minutes past/missing spawn time before checking mmopartybuilder.eu")
+    async def fallback_threshold(
+        self, interaction: discord.Interaction, minutes: app_commands.Range[int, 0, 1440]
+    ) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            storage.data["config"]["fallback_threshold_minutes"] = minutes
+            await storage.save()
+
+        await send_ephemeral(interaction, strings.config_fallback_threshold_updated(minutes))
 
     @app_commands.command(name="map", description="Upload/replace the map image for a zone")
     @app_commands.describe(
@@ -504,6 +551,45 @@ class AdminConfigGroup(app_commands.Group):
         )
 
     @app_commands.command(
+        name="fallback-sync", description="Force an immediate fallback timer sync for one zone"
+    )
+    @app_commands.describe(zone="Zone to sync against mmopartybuilder.eu")
+    @app_commands.autocomplete(zone=zone_autocomplete)
+    async def fallback_sync(self, interaction: discord.Interaction, zone: str) -> None:
+        storage = self.bot.storage
+        if zone not in storage.data["zones"]:
+            await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
+            return
+
+        zone_display_name = storage.data["zones"][zone]["display_name"]
+        await interaction.response.defer(ephemeral=True)
+        result, _ = await sync_zone_from_fallback(self.bot, zone)
+
+        await send_ephemeral(interaction, strings.fallback_sync_one_result(zone_display_name, result))
+        if result is FallbackSyncResult.APPLIED:
+            await self.bot.perpetual.force_update(self.bot, time.time())
+
+    @app_commands.command(
+        name="fallback-sync-all",
+        description="Force an immediate fallback timer sync for every zone",
+    )
+    async def fallback_sync_all(self, interaction: discord.Interaction) -> None:
+        storage = self.bot.storage
+        await interaction.response.defer(ephemeral=True)
+
+        lines: list[str] = []
+        applied_any = False
+        for zone_key in list(storage.data["zones"].keys()):
+            zone_display_name = storage.data["zones"][zone_key]["display_name"]
+            result, _ = await sync_zone_from_fallback(self.bot, zone_key)
+            applied_any = applied_any or result is FallbackSyncResult.APPLIED
+            lines.append(strings.fallback_sync_result_line(zone_display_name, result))
+
+        await send_ephemeral(interaction, strings.FALLBACK_SYNC_ALL_HEADER + "\n" + "\n".join(lines))
+        if applied_any:
+            await self.bot.perpetual.force_update(self.bot, time.time())
+
+    @app_commands.command(
         name="repost",
         description="Recreate the perpetual status message if it was deleted, or force a refresh",
     )
@@ -534,6 +620,11 @@ class AdminConfigGroup(app_commands.Group):
             strings.config_show_admin_role_line(admin_role_mention),
             strings.config_show_alert_offset_line(config["alert_offset_minutes"]),
             strings.config_show_timezone_line(config["timezone"]),
+            strings.config_show_fallback_line(
+                config["fallback_enabled"],
+                SERVER_DISPLAY_NAMES.get(config["fallback_server"], config["fallback_server"]),
+                config["fallback_threshold_minutes"],
+            ),
         ]
 
         zone_lines = [

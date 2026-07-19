@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from bot import domain
 from bot.alerts import AlertManager
-from bot.models import build_seed_data
+from bot.models import build_seed_data, build_zone_state
 from bot.perpetual_message import PerpetualMessageManager
 from bot.scouting import (
     NO_SUBZONE_KEY,
@@ -21,7 +21,7 @@ class TestChunkSubzoneKeys:
         assert [len(c) for c in chunk_subzone_keys(zone)] == [5, 3]
 
     def test_no_subzones_gives_no_chunks(self):
-        zone = build_seed_data()["zones"]["syleus"]
+        zone = build_zone_state("Test Zone", 240)
         assert chunk_subzone_keys(zone) == []
 
     def test_exactly_five_is_a_single_chunk(self):
@@ -73,12 +73,12 @@ class TestScoutingViewLayout:
         assert len(view.children) == len(subzone_keys) * 2
 
     def test_zero_subzone_zone_gets_one_generic_kill_button(self, bot):
-        view = ScoutingView(bot, "syleus", [], show_kill_button=True)
+        view = ScoutingView(bot, "no-such-zone", [], show_kill_button=True)
         assert len(view.children) == 1
         assert view.children[0].custom_id.endswith(f":{NO_SUBZONE_KEY}")
 
     def test_zero_subzone_zone_without_kill_button_has_nothing(self, bot):
-        view = ScoutingView(bot, "syleus", [])
+        view = ScoutingView(bot, "no-such-zone", [])
         assert len(view.children) == 0
 
 

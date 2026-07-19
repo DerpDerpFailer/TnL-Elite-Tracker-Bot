@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import discord
 
+from bot import domain
 from bot.cogs.admin_commands import AdminConfigGroup
 from tests.fakes import FakeInteraction
 
 
 def _cog(bot) -> AdminConfigGroup:
     return AdminConfigGroup(bot)
+
+
+class _FakePerpetual:
+    def __init__(self) -> None:
+        self.force_update_calls = 0
+
+    async def force_update(self, bot, now):
+        self.force_update_calls += 1
 
 
 class _FakeTooLargeResponse:
@@ -157,8 +166,9 @@ class TestPreviewZone:
 
         interaction.response.send_message = flaky_send_message
 
-        # syleus has no sub-zones, so this is a single-chunk, single-embed call
-        await cog.preview_zone.callback(cog, interaction, "syleus")
+        # a zone with no sub-zones, so this is a single-chunk, single-embed call
+        domain.add_zone(bot.storage.data, "no-subzones", "No Subzones", 240)
+        await cog.preview_zone.callback(cog, interaction, "no-subzones")
 
         content, kwargs = interaction.response.send_message_calls[0]
         assert "embeds" not in kwargs
@@ -208,3 +218,89 @@ class TestResetMaps:
 
         content, _ = interaction.response.send_message_calls[0]
         assert content == "Unknown zone. Pick one from the autocomplete list."
+
+
+class TestFallbackConfigCommands:
+    async def test_fallback_enabled_updates_config(self, bot):
+        cog = _cog(bot)
+        interaction = FakeInteraction()
+
+        await cog.fallback_enabled.callback(cog, interaction, True)
+
+        assert bot.storage.data["config"]["fallback_enabled"] is True
+        content, _ = interaction.response.send_message_calls[0]
+        assert "enabled" in content.lower()
+
+    async def test_fallback_server_updates_config(self, bot):
+        cog = _cog(bot)
+        interaction = FakeInteraction()
+
+        await cog.fallback_server.callback(cog, interaction, "sophia")
+
+        assert bot.storage.data["config"]["fallback_server"] == "sophia"
+        content, _ = interaction.response.send_message_calls[0]
+        assert "Sophia" in content
+
+    async def test_fallback_threshold_updates_config(self, bot):
+        cog = _cog(bot)
+        interaction = FakeInteraction()
+
+        await cog.fallback_threshold.callback(cog, interaction, 10)
+
+        assert bot.storage.data["config"]["fallback_threshold_minutes"] == 10
+        content, _ = interaction.response.send_message_calls[0]
+        assert "10" in content
+
+
+class TestFallbackSyncCommands:
+    async def test_fallback_sync_reports_the_result_and_forces_a_refresh_on_applied(
+        self, bot, monkeypatch
+    ):
+        from bot.fallback import FallbackSyncResult
+
+        async def fake_sync(bot_, zone_key):
+            return FallbackSyncResult.APPLIED, bot.storage.data["zones"][zone_key]
+
+        monkeypatch.setattr("bot.cogs.admin_commands.sync_zone_from_fallback", fake_sync)
+        bot.perpetual = _FakePerpetual()
+
+        cog = _cog(bot)
+        interaction = FakeInteraction()
+        await cog.fallback_sync.callback(cog, interaction, "nix")
+
+        assert interaction.response.defer_calls == 1
+        content, _ = interaction.followup.sent[0]
+        assert "Nix" in content
+        assert "updated" in content
+        assert bot.perpetual.force_update_calls == 1
+
+    async def test_fallback_sync_unknown_zone_reports_error_without_deferring(self, bot):
+        cog = _cog(bot)
+        interaction = FakeInteraction()
+
+        await cog.fallback_sync.callback(cog, interaction, "nowhere")
+
+        assert interaction.response.defer_calls == 0
+        content, _ = interaction.response.send_message_calls[0]
+        assert content == "Unknown zone. Pick one from the autocomplete list."
+
+    async def test_fallback_sync_all_reports_one_line_per_zone(self, bot, monkeypatch):
+        from bot.fallback import FallbackSyncResult
+
+        async def fake_sync(bot_, zone_key):
+            if zone_key == "nix":
+                return FallbackSyncResult.APPLIED, bot.storage.data["zones"][zone_key]
+            return FallbackSyncResult.NO_NEWER_DATA, None
+
+        monkeypatch.setattr("bot.cogs.admin_commands.sync_zone_from_fallback", fake_sync)
+        bot.perpetual = _FakePerpetual()
+
+        cog = _cog(bot)
+        interaction = FakeInteraction()
+        await cog.fallback_sync_all.callback(cog, interaction)
+
+        assert interaction.response.defer_calls == 1
+        content, _ = interaction.followup.sent[0]
+        assert content.count("\n") == len(bot.storage.data["zones"])  # header + one line each
+        assert "Nix" in content and "updated" in content
+        assert bot.perpetual.force_update_calls == 1

@@ -8,6 +8,7 @@ lookups keyed by the interaction's locale) without touching command logic.
 """
 from __future__ import annotations
 
+from bot.fallback import FallbackSyncResult
 from bot.models import ZonePhase
 
 # ---------------------------------------------------------------------------
@@ -429,6 +430,50 @@ def config_admin_role_cleared() -> str:
     return "Admin role cleared — only members with **Manage Server** can now use `/elite-config`."
 
 
+# ---------------------------------------------------------------------------
+# /elite-config fallback-*
+# ---------------------------------------------------------------------------
+
+
+def config_fallback_enabled_updated(enabled: bool) -> str:
+    if enabled:
+        return (
+            "Fallback timer sync **enabled** — a zone with a missing or overdue spawn time will "
+            "be checked against mmopartybuilder.eu automatically."
+        )
+    return "Fallback timer sync **disabled**."
+
+
+def config_fallback_server_updated(server_display_name: str) -> str:
+    return f"Fallback timer sync will now check the **{server_display_name}** server."
+
+
+def config_fallback_threshold_updated(minutes: int) -> str:
+    return (
+        f"Fallback timer sync now triggers once a zone's spawn time is missing or overdue by "
+        f"{minutes} minute(s)."
+    )
+
+
+FALLBACK_SYNC_ALL_HEADER = "Fallback sync results:"
+
+FALLBACK_SYNC_LABELS: dict[FallbackSyncResult, str] = {
+    FallbackSyncResult.APPLIED: "updated ✅",
+    FallbackSyncResult.NO_NEWER_DATA: "no newer data found",
+    FallbackSyncResult.FETCH_FAILED: "couldn't reach mmopartybuilder.eu ⚠️",
+    FallbackSyncResult.UNKNOWN_ZONE: "unknown zone",
+    FallbackSyncResult.NOT_ELIGIBLE: "no fallback mapping for this zone",
+}
+
+
+def fallback_sync_one_result(zone_display_name: str, result: FallbackSyncResult) -> str:
+    return f"**{zone_display_name}**: {FALLBACK_SYNC_LABELS[result]}"
+
+
+def fallback_sync_result_line(zone_display_name: str, result: FallbackSyncResult) -> str:
+    return f"• **{zone_display_name}**: {FALLBACK_SYNC_LABELS[result]}"
+
+
 CONFIG_SHOW_TITLE = "Elite Tracker Configuration"
 CONFIG_SHOW_GENERAL_FIELD = "General"
 CONFIG_SHOW_ZONES_FIELD = "Zones"
@@ -465,6 +510,15 @@ def config_show_alert_offset_line(minutes: int) -> str:
 
 def config_show_timezone_line(tz: str) -> str:
     return f"**Timezone:** `{tz}`"
+
+
+def config_show_fallback_line(enabled: bool, server_display_name: str, threshold_minutes: int) -> str:
+    if not enabled:
+        return "**Fallback sync:** disabled"
+    return (
+        f"**Fallback sync:** enabled ({server_display_name}, triggers "
+        f"{threshold_minutes}m after a spawn time is missing/overdue)"
+    )
 
 
 def config_show_zone_line(

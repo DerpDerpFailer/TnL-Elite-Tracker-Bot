@@ -20,6 +20,9 @@ class Config(TypedDict):
     timezone: str
     perpetual_message_id: int | None
     admin_role_id: int | None
+    fallback_enabled: bool
+    fallback_server: str
+    fallback_threshold_minutes: int
 
 
 class SubzoneState(TypedDict):
@@ -125,6 +128,9 @@ def build_seed_data() -> RootData:
             timezone="Europe/Paris",
             perpetual_message_id=None,
             admin_role_id=None,
+            fallback_enabled=False,
+            fallback_server="sacred",
+            fallback_threshold_minutes=5,
         ),
         zones={
             slug: build_zone_state(

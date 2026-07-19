@@ -18,6 +18,7 @@ from discord.ext import tasks
 
 from bot import strings
 from bot.constants import MAPS_DIR
+from bot.fallback import FallbackSyncResult, sync_zone_from_fallback
 from bot.models import ZoneState
 from bot.perpetual_message import PerpetualMessageManager
 from bot.scouting import ScoutingView, build_scouting_embed, chunk_subzone_keys
@@ -25,12 +26,18 @@ from bot.storage import Storage
 
 logger = logging.getLogger(__name__)
 
+# Minimum time between automatic fallback attempts for the same zone while it
+# stays stale, so a zone nobody reports for hours doesn't hammer the (best-
+# effort, unofficial) fallback endpoint every 30s tick forever.
+FALLBACK_RETRY_SECONDS = 300
+
 
 class AlertManager:
     def __init__(self, storage: Storage, perpetual: PerpetualMessageManager) -> None:
         self.storage = storage
         self.perpetual = perpetual
         self._loop: tasks.Loop | None = None
+        self._last_fallback_attempt: dict[str, float] = {}
 
     def start(self, bot: discord.Client) -> None:
         if self._loop is not None:
@@ -53,6 +60,11 @@ class AlertManager:
 
     async def check_spawns(self, bot: discord.Client) -> None:
         now = time.time()
+
+        # Independent of alert-channel setup: a stale/missing timer can be
+        # resynced from the fallback source even if no channel is configured.
+        await self._check_fallback(bot, now)
+
         config = self.storage.data["config"]
         channel_id = config["alert_channel_id"] or config["channel_id"]
         if channel_id is None:
@@ -199,3 +211,34 @@ class AlertManager:
 
         zone["spawn_due_marked"] = True
         return True
+
+    async def _check_fallback(self, bot: discord.Client, now: float) -> None:
+        """For each zone whose spawn timer is missing or overdue by at least
+        the configured threshold, try the (best-effort, toggleable)
+        mmopartybuilder.eu fallback — see bot/fallback.py. Never touches
+        Discord directly and never raises: sync_zone_from_fallback already
+        swallows every network/parsing failure."""
+        config = self.storage.data["config"]
+        if not config["fallback_enabled"]:
+            return
+
+        threshold_seconds = config["fallback_threshold_minutes"] * 60
+        # Snapshot via list() — unlike the lock-free due-scan above, this loop
+        # awaits between zones, so a concurrent zone-add/zone-remove could
+        # otherwise mutate the dict mid-iteration.
+        for zone_key, zone in list(self.storage.data["zones"].items()):
+            stale = zone["spawn_at"] is None or now >= zone["spawn_at"] + threshold_seconds
+            if not stale:
+                continue
+
+            last_attempt = self._last_fallback_attempt.get(zone_key, 0.0)
+            if now - last_attempt < FALLBACK_RETRY_SECONDS:
+                continue
+            self._last_fallback_attempt[zone_key] = now
+
+            result, _ = await sync_zone_from_fallback(bot, zone_key)
+            if result is FallbackSyncResult.APPLIED:
+                logger.info(
+                    "Fallback sync applied a newer kill for %s from mmopartybuilder.eu", zone_key
+                )
+                self.perpetual.mark_dirty()

@@ -250,6 +250,26 @@ class Storage:
 
             version = 10
 
+        if version < 11:
+            # v11 removes "syleus" as a standalone zone: it was never a real
+            # region on its own — it's the boss inside Laslan Abyss (our
+            # laslan-dungeon), already tracked there as the Syleus B1-B6
+            # sub-zones since v10. It had no map, no sub-zones and (per
+            # community reference data) no matching timer of its own, so it
+            # was just dead weight left over from the original zone list.
+            self.data["zones"].pop("syleus", None)
+            self.data["history"].pop("syleus", None)
+            self.data["undo"].pop("syleus", None)
+            version = 11
+
+        if version < 12:
+            # v12 adds the mmopartybuilder.eu fallback-timer settings.
+            config = self.data["config"]
+            config.setdefault("fallback_enabled", False)
+            config.setdefault("fallback_server", "sacred")
+            config.setdefault("fallback_threshold_minutes", 5)
+            version = 12
+
         if version != SCHEMA_VERSION:
             logger.warning(
                 "Data file version %s does not match expected %s after migrations; using as-is",
