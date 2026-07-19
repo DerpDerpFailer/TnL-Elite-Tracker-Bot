@@ -13,6 +13,7 @@ from discord.ext import commands
 from bot import strings
 from bot.alerts import AlertManager
 from bot.config import load_env_config
+from bot.default_maps import seed_default_maps
 from bot.interactions import send_ephemeral
 from bot.perpetual_message import PerpetualMessageManager
 from bot.scouting import FoundAnnouncementView, ScoutingView, chunk_subzone_keys
@@ -41,6 +42,10 @@ class EliteBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         self.storage.load_or_seed()
+
+        copied = seed_default_maps()
+        if copied:
+            logger.info("Seeded %d default map image(s) into place", len(copied))
 
         # Re-register a persistent scouting-buttons view per zone/chunk, in
         # both the pre-alert (no kill button) and spawn-due/found (with kill

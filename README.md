@@ -16,7 +16,7 @@ State is a single JSON file (`/data/elite.json`), written atomically with a
 - [Invite URL](#invite-url)
 - [Local development](#local-development)
 - [Running tests](#running-tests)
-- [Bulk-importing maps at install time](#bulk-importing-maps-at-install-time)
+- [Pre-configured zones, sub-zones and maps](#pre-configured-zones-sub-zones-and-maps)
 - [Deploying with Portainer](#deploying-with-portainer)
 - [Updating the bot](#updating-the-bot)
 - [Command reference](#command-reference)
@@ -163,34 +163,25 @@ Requires Python 3.12+ (same as the bot itself). A GitHub Actions workflow
 (`.github/workflows/tests.yml`) runs the same suite on every push/PR to
 `main`.
 
-## Bulk-importing maps at install time
+## Pre-configured zones, sub-zones and maps
 
-`/elite-config map` and `submap` are the normal, ongoing way to upload map
-images one at a time. For a fresh install with a whole folder of reference
-images already on hand, `scripts/import_maps.py` is a one-off helper that
-copies them all into place in a single run — it's not part of the running
-bot, just a provisioning script you run once (and it's safe to re-run: it
-only fills in what's missing).
+The `images/` folder at the repo root (`Zone.png` / `Zone - Sub-zone.png`) is
+bundled straight into the Docker image (see the `Dockerfile`'s
+`COPY images ./images`) and matched to zones/sub-zones via the table in
+`bot/default_maps.py`. On every startup, the bot copies any of these bundled
+images into `/data/maps` that isn't already there — so a brand new install
+(or a fresh `/data` volume on a different server) comes up fully
+pre-configured with every default zone, sub-zone and map, with nothing to
+run by hand.
 
-It also applies a fixed set of sub-zone corrections worked out from the
-actual in-game floor names (some dungeon floors were tracked under the wrong
-"1B" vs "B1" pattern, a few floors weren't tracked at all, and one sub-zone
-was renamed) — see `_SUBZONE_REMOVALS`/`_SUBZONE_RENAMES`/`_SUBZONE_ADDITIONS`
-at the top of the script.
+It only ever fills in what's *missing*: a map already in `/data/maps` (e.g.
+one you replaced with `/elite-config map`/`submap`) is never overwritten by
+the bundled default. Those two commands remain the way to add a map for a
+custom zone/sub-zone, or to replace a bundled one with something else.
 
-```bash
-# from the repo root, with the images in ./images named "Zone.png" or
-# "Zone - Sub-zone.png"
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-
-python -m scripts.import_maps --images-dir images --data-dir ./data   # local test run
-python -m scripts.import_maps --images-dir images --data-dir /data    # inside the deployed container/volume
-```
-
-It prints how many images were copied and warns (without failing) about any
-expected image missing from `--images-dir`, or any image present there that
-isn't in its mapping table.
+To add or update a bundled default yourself, drop the image into `images/`
+following the same `Zone.png`/`Zone - Sub-zone.png` naming, add the matching
+entry to `IMAGE_MAP` in `bot/default_maps.py`, and commit both.
 
 ## Deploying with Portainer
 

@@ -37,6 +37,47 @@ from bot.slugs import slugify
 
 logger = logging.getLogger(__name__)
 
+# --- v9 -> v10 migration data: a handful of dungeon sub-zones were tracked
+# under the wrong "1B" vs "B1" pattern or not tracked at all, worked out from
+# the actual in-game floor images (see bot/default_maps.py). Brand new
+# installs already seed the corrected names directly (bot/constants.py); this
+# only matters for a data file seeded before this fix.
+_V10_SUBZONE_REMOVALS: list[tuple[str, str]] = [
+    ("laslan-dungeon", "Syleus 1F"),
+    ("laslan-dungeon", "Syleus 2F"),
+    ("laslan-dungeon", "Syleus 3F"),
+    ("laslan-dungeon", "Syleus 4F"),
+    ("laslan-dungeon", "Syleus 5F"),
+    ("stonegard-dungeon", "Sylaveth 1F"),
+    ("stonegard-dungeon", "Sylaveth 2F"),
+    ("nix", "Scar of Sacrifice"),
+]
+
+_V10_SUBZONE_RENAMES: list[tuple[str, str, str]] = [
+    ("laslan-dungeon", "Shadowed Crypt 1B", "Shadowed Crypt B1"),
+    ("stonegard-dungeon", "Sanctum 1B", "Sanctum B1"),
+    ("talandre-dungeon", "Bercant 1B", "Bercant B1"),
+    ("talandre-dungeon", "Crimson 1B", "Crimson B1"),
+    ("talandre-dungeon", "Crimson 2B", "Crimson B2"),
+    ("talandre-dungeon", "Crimson 3B", "Crimson B3"),
+    ("talandre-dungeon", "Temple of Truth 1B", "Temple of Truth B1"),
+    ("talandre-dungeon", "Temple of Truth 2B", "Temple of Truth B2"),
+]
+
+_V10_SUBZONE_ADDITIONS: list[tuple[str, str]] = [
+    ("laslan-dungeon", "Syleus B1"),
+    ("laslan-dungeon", "Syleus B2"),
+    ("laslan-dungeon", "Syleus B3"),
+    ("laslan-dungeon", "Syleus B4"),
+    ("laslan-dungeon", "Syleus B5"),
+    ("laslan-dungeon", "Syleus B6"),
+    ("stonegard-dungeon", "Sylaveth B1"),
+    ("stonegard-dungeon", "Sylaveth B2"),
+    ("talandre-dungeon", "Crimson 1F"),
+    ("talandre-dungeon", "Temple of Truth 1F"),
+    ("nix", "Border Zone"),
+]
+
 
 class Storage:
     def __init__(self, path: Path = DATA_FILE, backup_path: Path = BACKUP_FILE) -> None:
@@ -182,6 +223,32 @@ class Storage:
             for zone in self.data["zones"].values():
                 zone["spawn_due_marked"] = zone.pop("start_alert_sent", False)
             version = 9
+
+        if version < 10:
+            # v10 corrects the dungeon sub-zone names — see the comment on
+            # _V10_SUBZONE_REMOVALS above for the full story.
+            for zone_key, display_name in _V10_SUBZONE_REMOVALS:
+                zone = self.data["zones"].get(zone_key)
+                if zone is not None:
+                    zone["subzones"].pop(slugify(display_name), None)
+
+            for zone_key, old_name, new_name in _V10_SUBZONE_RENAMES:
+                zone = self.data["zones"].get(zone_key)
+                if zone is None:
+                    continue
+                subzones = zone["subzones"]
+                subzone = subzones.pop(slugify(old_name), None)
+                if subzone is not None:
+                    subzone["display_name"] = new_name
+                    subzones[slugify(new_name)] = subzone
+
+            for zone_key, display_name in _V10_SUBZONE_ADDITIONS:
+                zone = self.data["zones"].get(zone_key)
+                if zone is not None:
+                    subzone_key = slugify(display_name)
+                    zone["subzones"].setdefault(subzone_key, build_subzone_state(display_name))
+
+            version = 10
 
         if version != SCHEMA_VERSION:
             logger.warning(

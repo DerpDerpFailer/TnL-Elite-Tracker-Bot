@@ -166,6 +166,81 @@ def test_migration_preserves_existing_pending_kill_state(tmp_path):
     ]
 
 
+def test_migrates_v9_dungeon_subzone_names_to_v10(tmp_path):
+    path = tmp_path / "elite.json"
+    backup = tmp_path / "elite.json.bak"
+    old_v9 = {
+        "version": 9,
+        "config": {
+            "channel_id": None,
+            "alert_channel_id": None,
+            "alert_role_id": None,
+            "alert_offset_minutes": 15,
+            "timezone": "Europe/Paris",
+            "perpetual_message_id": None,
+            "admin_role_id": None,
+        },
+        "zones": {
+            "laslan-dungeon": {
+                "display_name": "Laslan Dungeon",
+                "cooldown_minutes": 240,
+                "last_kill_at": None,
+                "last_kill_by": None,
+                "last_kill_subzone": None,
+                "spawn_at": None,
+                "pre_alert_sent": False,
+                "spawn_due_marked": False,
+                "found_this_cycle": False,
+                "subzones": {
+                    "shadowed-crypt-1f": {"display_name": "Shadowed Crypt 1F", "scouts": []},
+                    "shadowed-crypt-1b": {"display_name": "Shadowed Crypt 1B", "scouts": [42]},
+                    "syleus-1f": {"display_name": "Syleus 1F", "scouts": []},
+                    "syleus-2f": {"display_name": "Syleus 2F", "scouts": []},
+                },
+                "scouting_messages": [],
+                "found_announcement_message": None,
+            },
+            "nix": {
+                "display_name": "Nix",
+                "cooldown_minutes": 360,
+                "last_kill_at": None,
+                "last_kill_by": None,
+                "last_kill_subzone": None,
+                "spawn_at": None,
+                "pre_alert_sent": False,
+                "spawn_due_marked": False,
+                "found_this_cycle": False,
+                "subzones": {
+                    "scar-of-sacrifice": {"display_name": "Scar of Sacrifice", "scouts": []},
+                },
+                "scouting_messages": [],
+                "found_announcement_message": None,
+            },
+        },
+        "history": {"laslan-dungeon": [], "nix": []},
+        "undo": {},
+    }
+    path.write_text(json.dumps(old_v9))
+
+    storage = Storage(path=path, backup_path=backup)
+    storage.load_or_seed()
+
+    assert storage.data["version"] == SCHEMA_VERSION
+    laslan_dungeon = storage.data["zones"]["laslan-dungeon"]
+    subzones = laslan_dungeon["subzones"]
+    assert "syleus-1f" not in subzones and "syleus-2f" not in subzones
+    assert "shadowed-crypt-1b" not in subzones
+    assert subzones["shadowed-crypt-b1"]["display_name"] == "Shadowed Crypt B1"
+    assert subzones["shadowed-crypt-b1"]["scouts"] == [42]  # renamed, scouts preserved
+    assert {"syleus-b1", "syleus-b2", "syleus-b3", "syleus-b4", "syleus-b5", "syleus-b6"} <= set(
+        subzones
+    )
+
+    nix = storage.data["zones"]["nix"]
+    assert "scar-of-sacrifice" not in nix["subzones"]
+    assert "border-zone" in nix["subzones"]
+
+
 class TestZoneLock:
     def test_same_key_returns_the_same_lock(self, storage):
         assert storage.zone_lock("laslan") is storage.zone_lock("laslan")

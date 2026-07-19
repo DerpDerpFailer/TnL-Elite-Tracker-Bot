@@ -1,6 +1,5 @@
 .env
 /data
-/images
 __pycache__/
 *.pyc
 *.pyo
