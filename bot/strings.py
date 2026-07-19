@@ -388,6 +388,17 @@ def config_submap_updated(zone_display_name: str, subzone_display_name: str) -> 
     return f"Map image updated for **{subzone_display_name}** ({zone_display_name})."
 
 
+MAP_NOT_UPLOADED_NOTE = "No map uploaded yet."
+
+
+def preview_zone_header(zone_display_name: str) -> str:
+    return f"\U0001f5fa️ Maps for **{zone_display_name}**"
+
+
+def config_map_missing(title: str) -> str:
+    return f"No map uploaded yet for **{title}**."
+
+
 def config_repost_no_channel() -> str:
     return "No channel is configured yet. Set one first with `/elite-config channel`."
 

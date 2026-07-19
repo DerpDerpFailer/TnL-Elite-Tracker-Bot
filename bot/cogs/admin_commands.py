@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfoNotFoundError
 
@@ -27,6 +28,9 @@ if TYPE_CHECKING:
     from bot.main import EliteBot
 
 logger = logging.getLogger(__name__)
+
+# Discord caps both embeds and file attachments at 10 per message.
+_MAX_PREVIEW_EMBEDS_PER_MESSAGE = 10
 
 
 def _has_admin_access(interaction: discord.Interaction, bot: "EliteBot") -> bool:
@@ -386,6 +390,79 @@ class AdminConfigGroup(app_commands.Group):
         await send_ephemeral(
             interaction, strings.config_submap_updated(zone_display_name, subzone_display_name)
         )
+
+    @app_commands.command(
+        name="preview-zone",
+        description="Show every map image for a zone: its own map plus every sub-zone's",
+    )
+    @app_commands.describe(zone="Zone to preview the maps for")
+    @app_commands.autocomplete(zone=zone_autocomplete)
+    async def preview_zone(self, interaction: discord.Interaction, zone: str) -> None:
+        storage = self.bot.storage
+        if zone not in storage.data["zones"]:
+            await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
+            return
+
+        zone_state = storage.data["zones"][zone]
+        entries: list[tuple[str, Path]] = [(zone_state["display_name"], MAPS_DIR / f"{zone}.png")]
+        for subzone_key, subzone in zone_state["subzones"].items():
+            entries.append((subzone["display_name"], MAPS_DIR / f"{zone}__{subzone_key}.png"))
+
+        header = strings.preview_zone_header(zone_state["display_name"])
+        for chunk_start in range(0, len(entries), _MAX_PREVIEW_EMBEDS_PER_MESSAGE):
+            chunk = entries[chunk_start : chunk_start + _MAX_PREVIEW_EMBEDS_PER_MESSAGE]
+            embeds: list[discord.Embed] = []
+            files: list[discord.File] = []
+            for title, map_path in chunk:
+                embed = discord.Embed(title=title, color=discord.Color.blurple())
+                if map_path.exists():
+                    embed.set_image(url=f"attachment://{map_path.name}")
+                    files.append(discord.File(map_path, filename=map_path.name))
+                else:
+                    embed.description = strings.MAP_NOT_UPLOADED_NOTE
+                embeds.append(embed)
+
+            await send_ephemeral(
+                interaction,
+                header if chunk_start == 0 else None,
+                embeds=embeds,
+                files=files,
+            )
+
+    @app_commands.command(
+        name="preview-map", description="Show the map image for a zone or one specific sub-zone"
+    )
+    @app_commands.describe(
+        zone="Zone to preview", subzone="Sub-zone to preview; omit for the zone-level map"
+    )
+    @app_commands.autocomplete(zone=zone_autocomplete, subzone=subzone_autocomplete)
+    async def preview_map(
+        self, interaction: discord.Interaction, zone: str, subzone: str | None = None
+    ) -> None:
+        storage = self.bot.storage
+        if zone not in storage.data["zones"]:
+            await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
+            return
+
+        zone_state = storage.data["zones"][zone]
+        if subzone is None:
+            title = zone_state["display_name"]
+            map_path = MAPS_DIR / f"{zone}.png"
+        else:
+            if subzone not in zone_state["subzones"]:
+                await send_ephemeral(interaction, strings.config_subzone_not_found())
+                return
+            title = zone_state["subzones"][subzone]["display_name"]
+            map_path = MAPS_DIR / f"{zone}__{subzone}.png"
+
+        if not map_path.exists():
+            await send_ephemeral(interaction, strings.config_map_missing(title))
+            return
+
+        embed = discord.Embed(title=title, color=discord.Color.blurple())
+        embed.set_image(url=f"attachment://{map_path.name}")
+        file = discord.File(map_path, filename=map_path.name)
+        await send_ephemeral(interaction, embed=embed, file=file)
 
     @app_commands.command(
         name="repost",

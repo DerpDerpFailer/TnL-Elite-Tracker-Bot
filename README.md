@@ -183,6 +183,9 @@ To add or update a bundled default yourself, drop the image into `images/`
 following the same `Zone.png`/`Zone - Sub-zone.png` naming, add the matching
 entry to `IMAGE_MAP` in `bot/default_maps.py`, and commit both.
 
+Use `/elite-config preview-zone`/`preview-map` (see below) to visually verify
+maps landed correctly after a deploy.
+
 ## Deploying with Portainer
 
 The bot is deployed as a **Portainer Stack of type "Repository"**, pointed at
@@ -291,6 +294,8 @@ finer-grained control.
 | `/elite-config subzone-add zone nom` | Add a scouting sub-zone to a zone. |
 | `/elite-config subzone-remove zone subzone` | Remove a sub-zone (and its map) from a zone. |
 | `/elite-config submap zone subzone image` | Upload/replace the map image for one specific sub-zone, sent ephemerally to whoever clicks its "Scouting" button. |
+| `/elite-config preview-zone zone` | Show every map image for a zone (its own map plus every sub-zone's), noting any that haven't been uploaded yet — handy for checking the bundled/uploaded maps landed correctly. |
+| `/elite-config preview-map zone [subzone]` | Show the map image for one specific zone or sub-zone. |
 | `/elite-config repost` | Recreate the perpetual status message if it was deleted by accident, or force an immediate refresh. |
 | `/elite-config show` | Show the full current configuration (channel, roles, offset, timezone, zones with their cooldowns and sub-zone counts) in one embed. |
 
@@ -312,6 +317,8 @@ Examples:
 /elite-config subzone-add zone:Nix nom:Frostbite Ridge
 /elite-config subzone-remove zone:Nix subzone:Frostbite Ridge
 /elite-config submap zone:Laslan subzone:Urstella Fields image:urstella-fields.png
+/elite-config preview-zone zone:Nix
+/elite-config preview-map zone:Laslan subzone:Urstella Fields
 /elite-config repost
 /elite-config show
 ```
