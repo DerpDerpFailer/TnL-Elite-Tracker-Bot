@@ -16,6 +16,7 @@ State is a single JSON file (`/data/elite.json`), written atomically with a
 - [Invite URL](#invite-url)
 - [Local development](#local-development)
 - [Running tests](#running-tests)
+- [Bulk-importing maps at install time](#bulk-importing-maps-at-install-time)
 - [Deploying with Portainer](#deploying-with-portainer)
 - [Updating the bot](#updating-the-bot)
 - [Command reference](#command-reference)
@@ -161,6 +162,35 @@ python -m pytest
 Requires Python 3.12+ (same as the bot itself). A GitHub Actions workflow
 (`.github/workflows/tests.yml`) runs the same suite on every push/PR to
 `main`.
+
+## Bulk-importing maps at install time
+
+`/elite-config map` and `submap` are the normal, ongoing way to upload map
+images one at a time. For a fresh install with a whole folder of reference
+images already on hand, `scripts/import_maps.py` is a one-off helper that
+copies them all into place in a single run — it's not part of the running
+bot, just a provisioning script you run once (and it's safe to re-run: it
+only fills in what's missing).
+
+It also applies a fixed set of sub-zone corrections worked out from the
+actual in-game floor names (some dungeon floors were tracked under the wrong
+"1B" vs "B1" pattern, a few floors weren't tracked at all, and one sub-zone
+was renamed) — see `_SUBZONE_REMOVALS`/`_SUBZONE_RENAMES`/`_SUBZONE_ADDITIONS`
+at the top of the script.
+
+```bash
+# from the repo root, with the images in ./images named "Zone.png" or
+# "Zone - Sub-zone.png"
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+python -m scripts.import_maps --images-dir images --data-dir ./data   # local test run
+python -m scripts.import_maps --images-dir images --data-dir /data    # inside the deployed container/volume
+```
+
+It prints how many images were copied and warns (without failing) about any
+expected image missing from `--images-dir`, or any image present there that
+isn't in its mapping table.
 
 ## Deploying with Portainer
 

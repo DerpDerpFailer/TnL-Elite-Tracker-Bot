@@ -120,7 +120,7 @@ class TestZoneManagement:
 
         assert added == ["Laslan Dungeon"]
         assert data["zones"]["laslan"]["cooldown_minutes"] == 999  # untouched
-        assert len(data["zones"]["laslan-dungeon"]["subzones"]) == 8
+        assert len(data["zones"]["laslan-dungeon"]["subzones"]) == 9
         assert domain.sync_default_zones(data) == []  # idempotent
 
 
