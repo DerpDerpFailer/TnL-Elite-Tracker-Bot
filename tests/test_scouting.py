@@ -48,16 +48,21 @@ class TestEmbeds:
         assert file is None  # no map uploaded in this test
 
     def test_boss_killed_embed_fields(self):
-        embed = build_boss_killed_embed("Laslan", "Urstella Fields", 1700000000.0, 555)
+        embed = build_boss_killed_embed("Laslan", "Urstella Fields", 1700000000.0, "<@555>")
         values = {f.name: f.value for f in embed.fields}
         assert values["Zone"] == "Laslan"
         assert values["Sub-zone"] == "Urstella Fields"
         assert values["Reported by"] == "<@555>"
 
     def test_boss_killed_embed_unknown_subzone_falls_back(self):
-        embed = build_boss_killed_embed("Syleus", None, 1700000000.0, 555)
+        embed = build_boss_killed_embed("Syleus", None, 1700000000.0, "<@555>")
         values = {f.name: f.value for f in embed.fields}
         assert values["Sub-zone"] == "Unknown"
+
+    def test_boss_killed_embed_accepts_a_plain_reported_by_string(self):
+        embed = build_boss_killed_embed("Nix", None, 1700000000.0, "mmopartybuilder.eu (auto)")
+        values = {f.name: f.value for f in embed.fields}
+        assert values["Reported by"] == "mmopartybuilder.eu (auto)"
 
 
 class TestScoutingViewLayout:

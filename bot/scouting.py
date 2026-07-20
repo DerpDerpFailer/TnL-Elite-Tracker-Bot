@@ -141,7 +141,7 @@ def build_elite_found_embed(
 
 
 def build_boss_killed_embed(
-    zone_display_name: str, subzone_display_name: str | None, kill_ts: float, user_id: int
+    zone_display_name: str, subzone_display_name: str | None, kill_ts: float, reported_by: str
 ) -> discord.Embed:
     embed = discord.Embed(title=strings.BOSS_KILLED_TITLE, color=discord.Color.dark_red())
     embed.add_field(name=strings.BOSS_KILLED_ZONE_FIELD, value=zone_display_name, inline=True)
@@ -154,7 +154,7 @@ def build_boss_killed_embed(
         name=strings.BOSS_KILLED_TIME_FIELD, value=f"<t:{int(kill_ts)}:F>", inline=False
     )
     embed.add_field(
-        name=strings.BOSS_KILLED_REPORTED_BY_FIELD, value=f"<@{user_id}>", inline=False
+        name=strings.BOSS_KILLED_REPORTED_BY_FIELD, value=reported_by, inline=False
     )
     return embed
 
@@ -184,7 +184,14 @@ async def _delete_tracked_message(bot: "EliteBot", zone_key: str, ref: dict, wha
 
 
 async def record_kill_and_close_scouting(
-    bot: "EliteBot", zone_key: str, subzone_key: str, user_id: int, user_name: str
+    bot: "EliteBot",
+    zone_key: str,
+    subzone_key: str,
+    user_id: int,
+    user_name: str,
+    *,
+    timestamp: float | None = None,
+    reported_by_display: str | None = None,
 ) -> ZoneState | None:
     """Records the kill (optionally for a specific sub-zone), then closes
     out *this zone's* cycle only: every scouting message and the Elite Found
@@ -192,46 +199,82 @@ async def record_kill_and_close_scouting(
     "Boss killed" summary posted in the same channel. Shared by the scouting
     message's per-row kill button and the Elite Found announcement's kill
     button. Returns None if the zone/sub-zone no longer exists (e.g. removed
-    by an admin mid-cycle)."""
-    storage = bot.storage
-    async with storage.zone_lock(zone_key):
-        zone = storage.data["zones"].get(zone_key)
-        has_subzone = subzone_key != NO_SUBZONE_KEY
-        if zone is None or (has_subzone and subzone_key not in zone["subzones"]):
-            return None
+    by an admin mid-cycle).
 
-        subzone_display_name = zone["subzones"][subzone_key]["display_name"] if has_subzone else None
-        scouting_refs = list(zone["scouting_messages"])
-        found_ref = zone["found_announcement_message"]
-
-        zone_state = domain.record_kill(
-            storage.data, zone_key, time.time(), user_id, user_name, subzone_display_name
+    Acquires the zone's lock itself — callers that already hold it (e.g.
+    bot/fallback.py's sync_zone_from_fallback, which needs the lock across
+    its own "is this newer" check) must call
+    `record_kill_and_close_scouting_locked` directly instead, since
+    asyncio.Lock isn't reentrant."""
+    async with bot.storage.zone_lock(zone_key):
+        return await record_kill_and_close_scouting_locked(
+            bot,
+            zone_key,
+            subzone_key,
+            user_id,
+            user_name,
+            timestamp=timestamp,
+            reported_by_display=reported_by_display,
         )
-        await storage.save()
 
-        for ref in scouting_refs:
-            await _delete_tracked_message(bot, zone_key, ref, "scouting message")
 
-        if found_ref is not None:
-            await _delete_tracked_message(bot, zone_key, found_ref, "elite-found announcement")
+async def record_kill_and_close_scouting_locked(
+    bot: "EliteBot",
+    zone_key: str,
+    subzone_key: str,
+    user_id: int,
+    user_name: str,
+    *,
+    timestamp: float | None = None,
+    reported_by_display: str | None = None,
+) -> ZoneState | None:
+    """Same as `record_kill_and_close_scouting`, but assumes the caller
+    already holds `storage.zone_lock(zone_key)`.
 
-        target_channel = None
-        if scouting_refs:
-            target_channel = await _resolve_channel(bot, scouting_refs[0]["channel_id"])
-        elif found_ref is not None:
-            target_channel = await _resolve_channel(bot, found_ref["channel_id"])
+    `timestamp` defaults to now (a live button click); pass the actual kill
+    time for a kill recorded after the fact (e.g. the fallback sync).
+    `reported_by_display` defaults to a `<@user_id>` mention (a real Discord
+    reporter); pass a plain string when there isn't one."""
+    storage = bot.storage
+    zone = storage.data["zones"].get(zone_key)
+    has_subzone = subzone_key != NO_SUBZONE_KEY
+    if zone is None or (has_subzone and subzone_key not in zone["subzones"]):
+        return None
 
-        if target_channel is not None:
-            killed_embed = build_boss_killed_embed(
-                zone_state["display_name"],
-                subzone_display_name,
-                zone_state["last_kill_at"],
-                user_id,
-            )
-            try:
-                await target_channel.send(embed=killed_embed)
-            except discord.HTTPException as exc:
-                logger.warning("Failed to send boss-killed summary for %s: %s", zone_key, exc)
+    subzone_display_name = zone["subzones"][subzone_key]["display_name"] if has_subzone else None
+    scouting_refs = list(zone["scouting_messages"])
+    found_ref = zone["found_announcement_message"]
+
+    kill_ts = timestamp if timestamp is not None else time.time()
+    zone_state = domain.record_kill(
+        storage.data, zone_key, kill_ts, user_id, user_name, subzone_display_name
+    )
+    await storage.save()
+
+    for ref in scouting_refs:
+        await _delete_tracked_message(bot, zone_key, ref, "scouting message")
+
+    if found_ref is not None:
+        await _delete_tracked_message(bot, zone_key, found_ref, "elite-found announcement")
+
+    target_channel = None
+    if scouting_refs:
+        target_channel = await _resolve_channel(bot, scouting_refs[0]["channel_id"])
+    elif found_ref is not None:
+        target_channel = await _resolve_channel(bot, found_ref["channel_id"])
+
+    if target_channel is not None:
+        reported_by = reported_by_display if reported_by_display is not None else f"<@{user_id}>"
+        killed_embed = build_boss_killed_embed(
+            zone_state["display_name"],
+            subzone_display_name,
+            zone_state["last_kill_at"],
+            reported_by,
+        )
+        try:
+            await target_channel.send(embed=killed_embed)
+        except discord.HTTPException as exc:
+            logger.warning("Failed to send boss-killed summary for %s: %s", zone_key, exc)
 
     return zone_state
 

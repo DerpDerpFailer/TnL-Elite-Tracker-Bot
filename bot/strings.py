@@ -8,8 +8,17 @@ lookups keyed by the interaction's locale) without touching command logic.
 """
 from __future__ import annotations
 
-from bot.fallback import FallbackSyncResult
+from typing import TYPE_CHECKING
+
 from bot.models import ZonePhase
+
+if TYPE_CHECKING:
+    # Deferred: bot.fallback will import bot.scouting (to close out scouting
+    # messages on a fallback-detected kill), which imports this module for
+    # embed text — a real-time import here would be circular. Safe because
+    # `from __future__ import annotations` already defers every annotation
+    # in this file to a string, so this name is never resolved at runtime.
+    from bot.fallback import FallbackSyncResult
 
 # ---------------------------------------------------------------------------
 # Perpetual status message
@@ -457,12 +466,16 @@ def config_fallback_threshold_updated(minutes: int) -> str:
 
 FALLBACK_SYNC_ALL_HEADER = "Fallback sync results:"
 
-FALLBACK_SYNC_LABELS: dict[FallbackSyncResult, str] = {
-    FallbackSyncResult.APPLIED: "updated ✅",
-    FallbackSyncResult.NO_NEWER_DATA: "no newer data found",
-    FallbackSyncResult.FETCH_FAILED: "couldn't reach mmopartybuilder.eu ⚠️",
-    FallbackSyncResult.UNKNOWN_ZONE: "unknown zone",
-    FallbackSyncResult.NOT_ELIGIBLE: "no fallback mapping for this zone",
+# Keyed by the plain string value (not the FallbackSyncResult enum member
+# itself) so this module never needs to import bot.fallback at runtime —
+# lookups below still work because FallbackSyncResult is a str subclass, so
+# a member and its value compare/hash equal.
+FALLBACK_SYNC_LABELS: dict[str, str] = {
+    "applied": "updated ✅",
+    "no_newer_data": "no newer data found",
+    "fetch_failed": "couldn't reach mmopartybuilder.eu ⚠️",
+    "unknown_zone": "unknown zone",
+    "not_eligible": "no fallback mapping for this zone",
 }
 
 

@@ -1,7 +1,9 @@
 """Best-effort fallback: when a zone's spawn timer is missing or stale, ask
 the (unofficial, community-run) mmopartybuilder.eu boss-timer map whether the
 Elite has already been killed, and adopt that kill time if it's newer than
-what we have.
+what we have — closing out the zone's scouting cycle exactly like a real
+kill report would (deletes tracked scouting/found messages, posts a "Boss
+killed" summary), via bot/scouting.py's shared helper.
 
 This talks to an internal API of that site (discovered by inspecting its
 network traffic, not a published/documented integration) — it could change
@@ -27,8 +29,8 @@ from typing import TYPE_CHECKING
 
 import aiohttp
 
-from bot import domain
 from bot.models import ZoneState
+from bot.scouting import NO_SUBZONE_KEY, record_kill_and_close_scouting_locked
 
 if TYPE_CHECKING:
     from bot.main import EliteBot
@@ -147,10 +149,13 @@ async def sync_zone_from_fallback(
 ) -> tuple[FallbackSyncResult, ZoneState | None]:
     """Fetches the zone's timer from the configured fallback server and, only
     if it's strictly newer than what we already have, records it as a kill
-    (same effect as /elite-killed, minus a real Discord reporter). Safe to
-    call whether or not the fallback feature is "enabled" — that flag only
-    gates the automatic background check in alerts.py; this function itself
-    has no opinion on when it should run."""
+    and closes out the zone's scouting cycle (deletes tracked scouting/found
+    messages, posts a "Boss killed" summary) exactly like a real kill report
+    — same effect as /elite-killed, minus a real Discord reporter, and using
+    the actual external kill time rather than "now". Safe to call whether or
+    not the fallback feature is "enabled" — that flag only gates the
+    automatic background check in alerts.py; this function itself has no
+    opinion on when it should run."""
     storage = bot.storage
     async with storage.zone_lock(zone_key):
         zone = storage.data["zones"].get(zone_key)
@@ -168,8 +173,21 @@ async def sync_zone_from_fallback(
         if zone["last_kill_at"] is not None and kill_ts <= zone["last_kill_at"]:
             return FallbackSyncResult.NO_NEWER_DATA, None
 
-        zone_state = domain.record_kill(
-            storage.data, zone_key, kill_ts, FALLBACK_REPORTER_ID, FALLBACK_REPORTER_NAME
+        # mmopartybuilder.eu only tracks a zone-wide timer, not which
+        # specific sub-zone the Elite was found in — NO_SUBZONE_KEY makes
+        # the summary embed's sub-zone field say "Unknown", same as a
+        # zero-sub-zone zone's generic kill button.
+        zone_state = await record_kill_and_close_scouting_locked(
+            bot,
+            zone_key,
+            NO_SUBZONE_KEY,
+            FALLBACK_REPORTER_ID,
+            FALLBACK_REPORTER_NAME,
+            timestamp=kill_ts,
+            reported_by_display=FALLBACK_REPORTER_NAME,
         )
-        await storage.save()
+        if zone_state is None:
+            # Removed by an admin while we were awaiting the network fetch.
+            return FallbackSyncResult.UNKNOWN_ZONE, None
+
         return FallbackSyncResult.APPLIED, zone_state

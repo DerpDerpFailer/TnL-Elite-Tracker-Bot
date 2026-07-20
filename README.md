@@ -196,7 +196,10 @@ maps landed correctly after a deploy.
 overdue by a configurable threshold, the bot checks
 [mmopartybuilder.eu](https://mmopartybuilder.eu)'s community boss-timer maps
 (one per PvP world) for a more recent kill, and adopts it if found — same
-effect as `/elite-killed`, just automatic.
+effect as clicking the "Elite killed" button: the zone's scouting/found
+messages are closed out and a "Boss killed" summary is posted (with a
+"Sub-zone: Unknown" field, since that site only tracks a zone-wide timer, not
+which sub-zone specifically), just without a real Discord reporter.
 
 This talks to an internal API of that site, not a published/documented
 integration, so it's built to fail completely silently: any network error,

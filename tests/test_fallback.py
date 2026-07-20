@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from bot.alerts import AlertManager
 from bot.constants import DEFAULT_ZONES
 from bot.fallback import (
     SERVERS,
@@ -9,6 +10,7 @@ from bot.fallback import (
     fetch_zone_kill_time,
     sync_zone_from_fallback,
 )
+from bot.perpetual_message import PerpetualMessageManager
 from tests.fakes import FakeBot, FakeChannel
 
 
@@ -228,6 +230,54 @@ class TestSyncZoneFromFallback:
 
         assert result is FallbackSyncResult.NOT_ELIGIBLE
         assert zone_state is None
+
+    async def test_applied_kill_closes_out_scouting_and_posts_boss_killed_summary(
+        self, storage, channel, monkeypatch
+    ):
+        bot = FakeBot(storage, channel)
+        mgr = AlertManager(storage, PerpetualMessageManager(storage))
+        zone = storage.data["zones"]["nix"]
+        await mgr._send_pre_alert(bot, channel, "nix", zone, role_mention=None)
+        primary_msg = channel.messages[zone["scouting_messages"][0]["message_id"]]
+        assert primary_msg.deleted is False
+
+        async def fake_fetch(server_key, zone_key, **kwargs):
+            return 999_999.0
+
+        monkeypatch.setattr("bot.fallback.fetch_zone_kill_time", fake_fetch)
+
+        result, zone_state = await sync_zone_from_fallback(bot, "nix")
+
+        assert result is FallbackSyncResult.APPLIED
+        assert zone_state["last_kill_at"] == 999_999.0  # the external kill time, not time.time()
+        assert primary_msg.deleted is True  # scouting message closed out, same as a real kill
+        assert zone["scouting_messages"] == []
+
+        boss_killed_embed = channel.sent[-1]["embed"]
+        assert boss_killed_embed.title == "\U0001f480 Boss killed"
+        values = {f.name: f.value for f in boss_killed_embed.fields}
+        assert values["Zone"] == "Nix"
+        assert values["Sub-zone"] == "Unknown"  # mmopartybuilder.eu is zone-wide, not per-sub-zone
+        assert values["Reported by"] == "mmopartybuilder.eu (auto)"
+
+    async def test_applied_kill_with_no_active_scouting_message_still_updates_data(
+        self, storage, channel, monkeypatch
+    ):
+        # spawn_at is None by default (fresh seed) -- this is the common
+        # trigger for the automatic fallback check, and there's nothing to
+        # close out yet since no pre-alert has ever gone out.
+        bot = FakeBot(storage, channel)
+
+        async def fake_fetch(server_key, zone_key, **kwargs):
+            return 1000.0
+
+        monkeypatch.setattr("bot.fallback.fetch_zone_kill_time", fake_fetch)
+
+        result, zone_state = await sync_zone_from_fallback(bot, "nix")
+
+        assert result is FallbackSyncResult.APPLIED
+        assert zone_state["last_kill_at"] == 1000.0
+        assert channel.sent == []  # nothing to announce, no channel to send to
 
 
 def test_servers_table_has_a_display_name_for_every_server():
