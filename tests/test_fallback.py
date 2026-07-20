@@ -10,6 +10,7 @@ from bot.fallback import (
     fetch_zone_kill_time,
     sync_zone_from_fallback,
 )
+from bot import strings
 from bot.perpetual_message import PerpetualMessageManager
 from tests.fakes import FakeBot, FakeChannel
 
@@ -259,6 +260,7 @@ class TestSyncZoneFromFallback:
         assert values["Zone"] == "Nix"
         assert values["Sub-zone"] == "Unknown"  # mmopartybuilder.eu is zone-wide, not per-sub-zone
         assert values["Reported by"] == "mmopartybuilder.eu (auto)"
+        assert values["Next spawn"] == strings.boss_killed_next_spawn_value(int(zone_state["spawn_at"]))
 
     async def test_applied_kill_with_no_active_scouting_message_still_updates_data(
         self, storage, channel, monkeypatch

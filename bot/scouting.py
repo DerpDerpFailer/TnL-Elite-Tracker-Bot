@@ -141,7 +141,11 @@ def build_elite_found_embed(
 
 
 def build_boss_killed_embed(
-    zone_display_name: str, subzone_display_name: str | None, kill_ts: float, reported_by: str
+    zone_display_name: str,
+    subzone_display_name: str | None,
+    kill_ts: float,
+    reported_by: str,
+    spawn_at: float,
 ) -> discord.Embed:
     embed = discord.Embed(title=strings.BOSS_KILLED_TITLE, color=discord.Color.dark_red())
     embed.add_field(name=strings.BOSS_KILLED_ZONE_FIELD, value=zone_display_name, inline=True)
@@ -152,6 +156,11 @@ def build_boss_killed_embed(
     )
     embed.add_field(
         name=strings.BOSS_KILLED_TIME_FIELD, value=f"<t:{int(kill_ts)}:F>", inline=False
+    )
+    embed.add_field(
+        name=strings.BOSS_KILLED_NEXT_SPAWN_FIELD,
+        value=strings.boss_killed_next_spawn_value(int(spawn_at)),
+        inline=False,
     )
     embed.add_field(
         name=strings.BOSS_KILLED_REPORTED_BY_FIELD, value=reported_by, inline=False
@@ -270,6 +279,7 @@ async def record_kill_and_close_scouting_locked(
             subzone_display_name,
             zone_state["last_kill_at"],
             reported_by,
+            zone_state["spawn_at"],
         )
         try:
             await target_channel.send(embed=killed_embed)

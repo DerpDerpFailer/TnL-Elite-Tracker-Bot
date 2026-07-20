@@ -157,7 +157,12 @@ BOSS_KILLED_ZONE_FIELD = "Zone"
 BOSS_KILLED_SUBZONE_FIELD = "Sub-zone"
 BOSS_KILLED_UNKNOWN_SUBZONE = "Unknown"
 BOSS_KILLED_TIME_FIELD = "Killed at"
+BOSS_KILLED_NEXT_SPAWN_FIELD = "Next spawn"
 BOSS_KILLED_REPORTED_BY_FIELD = "Reported by"
+
+
+def boss_killed_next_spawn_value(spawn_at_ts: int) -> str:
+    return f"<t:{spawn_at_ts}:t> (<t:{spawn_at_ts}:R>)"
 
 
 KILL_BUTTON_EMOJI = "\U0001f480"  # 💀

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from bot import domain
+from bot import domain, strings
 from bot.alerts import AlertManager
 from bot.models import build_seed_data, build_zone_state
 from bot.perpetual_message import PerpetualMessageManager
@@ -48,19 +48,24 @@ class TestEmbeds:
         assert file is None  # no map uploaded in this test
 
     def test_boss_killed_embed_fields(self):
-        embed = build_boss_killed_embed("Laslan", "Urstella Fields", 1700000000.0, "<@555>")
+        embed = build_boss_killed_embed(
+            "Laslan", "Urstella Fields", 1700000000.0, "<@555>", 1700014400.0
+        )
         values = {f.name: f.value for f in embed.fields}
         assert values["Zone"] == "Laslan"
         assert values["Sub-zone"] == "Urstella Fields"
         assert values["Reported by"] == "<@555>"
+        assert values["Next spawn"] == "<t:1700014400:t> (<t:1700014400:R>)"
 
     def test_boss_killed_embed_unknown_subzone_falls_back(self):
-        embed = build_boss_killed_embed("Syleus", None, 1700000000.0, "<@555>")
+        embed = build_boss_killed_embed("Syleus", None, 1700000000.0, "<@555>", 1700014400.0)
         values = {f.name: f.value for f in embed.fields}
         assert values["Sub-zone"] == "Unknown"
 
     def test_boss_killed_embed_accepts_a_plain_reported_by_string(self):
-        embed = build_boss_killed_embed("Nix", None, 1700000000.0, "mmopartybuilder.eu (auto)")
+        embed = build_boss_killed_embed(
+            "Nix", None, 1700000000.0, "mmopartybuilder.eu (auto)", 1700021600.0
+        )
         values = {f.name: f.value for f in embed.fields}
         assert values["Reported by"] == "mmopartybuilder.eu (auto)"
 
@@ -183,6 +188,7 @@ class TestFoundAndUndo:
         assert values["Zone"] == "Nix"
         assert values["Sub-zone"] == subzone_name
         assert values["Reported by"] == "<@777>"
+        assert values["Next spawn"] == strings.boss_killed_next_spawn_value(int(zone["spawn_at"]))
         # the zone is reset for the next cycle
         assert zone["scouting_messages"] == []
         assert zone["found_announcement_message"] is None
