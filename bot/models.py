@@ -23,6 +23,9 @@ class Config(TypedDict):
     fallback_enabled: bool
     fallback_server: str
     fallback_threshold_minutes: int
+    fallback_found_watch_enabled: bool
+    fallback_found_watch_attempts: int
+    fallback_found_watch_slow_interval_minutes: int
 
 
 class SubzoneState(TypedDict):
@@ -131,6 +134,9 @@ def build_seed_data() -> RootData:
             fallback_enabled=False,
             fallback_server="sacred",
             fallback_threshold_minutes=5,
+            fallback_found_watch_enabled=False,
+            fallback_found_watch_attempts=10,
+            fallback_found_watch_slow_interval_minutes=15,
         ),
         zones={
             slug: build_zone_state(

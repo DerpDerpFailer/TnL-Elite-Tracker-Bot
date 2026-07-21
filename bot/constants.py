@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Final, TypedDict
 
-SCHEMA_VERSION: Final[int] = 12
+SCHEMA_VERSION: Final[int] = 14
 
 DATA_DIR: Final[Path] = Path("/data")
 DATA_FILE: Final[Path] = DATA_DIR / "elite.json"
@@ -63,7 +63,7 @@ DEFAULT_SUBZONES: Final[dict[str, list[str]]] = {
         "Greyclaw Forest",
     ],
     "talandre": [
-        "Quietis Domain",
+        "Quietis's Demesne",
         "The Great Tree",
         "Swamp of Silence",
         "Black Anvil",
@@ -75,7 +75,7 @@ DEFAULT_SUBZONES: Final[dict[str, list[str]]] = {
         "Entropic Tundra",
         "Tumgir Hollow",
         "Stillreach",
-        "Border Zone",
+        "Scar of Sacrifice",
     ],
     "laslan-dungeon": [
         "Shadowed Crypt 1F",
@@ -107,6 +107,5 @@ DEFAULT_SUBZONES: Final[dict[str, list[str]]] = {
         "Crimson B1",
         "Crimson B2",
         "Crimson B3",
-        "Crimson 1F",
     ],
 }

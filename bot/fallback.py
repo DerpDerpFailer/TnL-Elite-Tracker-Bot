@@ -30,7 +30,11 @@ from typing import TYPE_CHECKING
 import aiohttp
 
 from bot.models import ZoneState
-from bot.scouting import NO_SUBZONE_KEY, record_kill_and_close_scouting_locked
+from bot.scouting import (
+    NO_SUBZONE_KEY,
+    mark_found_and_announce_locked,
+    record_kill_and_close_scouting_locked,
+)
 
 if TYPE_CHECKING:
     from bot.main import EliteBot
@@ -73,6 +77,95 @@ _ZONE_OFFSETS: dict[str, int] = {
     "talandre": 4,
     "talandre-dungeon": 5,
     "nix": 6,
+}
+
+# our zone_key -> {mmopartybuilder "boss"-icon spot name -> our sub-zone key}.
+# Built from the live scouting board for each region (verified by hand,
+# 2026-07-20/21) — several mmopartybuilder spots are more granular than our
+# own sub-zones (e.g. two "Syleus Abyss - B6" variants), so this is a
+# many-to-one mapping in places. A spot with no entry here just can't be
+# auto-detected by the found-watch (see bot/alerts.py), which is harmless —
+# it only ever adds information, never required.
+_SUBZONE_NAME_MAP: dict[str, dict[str, str]] = {
+    "laslan": {
+        "Urstella Fields": "urstella-fields",
+        "Carmine Forest": "carmine-forest",
+        "Nesting Grounds": "nesting-grounds",
+        "Fonos Basin": "fonos-basin",
+        "Ruins of Turayne": "ruins-of-turayne",
+        "Purelight Hill": "purelight-hill",
+        "Shattered Temple": "shattered-temple",
+    },
+    "laslan-dungeon": {
+        "Shadowed Crypt - 1F": "shadowed-crypt-1f",
+        "Shadowed Crypt - 2F": "shadowed-crypt-2f",
+        "Shadowed Crypt - B1 (Not confirmed)": "shadowed-crypt-b1",
+        "Syleus Abyss - B1": "syleus-b1",
+        "Syleus Abyss - B2 (Corridor of Oblivion)": "syleus-b2",
+        "Syleus Abyss - B2 (Corridor of Loss)": "syleus-b2",
+        "Syleus Abyss - B3": "syleus-b3",
+        "Syleus Abyss - B4 (North-East)": "syleus-b4",
+        "Syleus Abyss - B4 (South-West)": "syleus-b4",
+        "Syleus Abyss - B5": "syleus-b5",
+        "Syleus Abyss - B6 (North)": "syleus-b6",
+        "Syleus Abyss - B6 (West)": "syleus-b6",
+    },
+    "stonegard": {
+        "Monolith Wastelands": "monolith-wastelands",
+        "Abandoned Stonemason Town": "abandoned-stonemason",
+        "Daybreak Shore": "daybreak-shore",
+        "Manawastes": "manawastes",
+        "The Raging Wilds": "raging-wilds",
+        "Greyclaw Forest": "greyclaw-forest",
+        "Akidu Valley": "akidu-valley",
+        "Sandworm Lair (Eastern Hatchery)": "sandworm-lair",
+    },
+    "stonegard-dungeon": {
+        "Ant Nest - 1 (North)": "ant-nest",
+        "Ant Nest - 2 (Garbage Dump)": "ant-nest",
+        "Ant Nest - 3 (South)": "ant-nest",
+        "Sanctum of Desire - 1F": "sanctum-1f",
+        "Sanctum of Desire - B1 (Altar of Darkness)": "sanctum-b1",
+        "Sanctum of Desire - B1 (Junobote's Study)": "sanctum-b1",
+        "Saurodoma - Cave (East)": "saurodoma-in",
+        "Saurodoma - Cave (West)": "saurodoma-in",
+        "Saurodoma - Outside": "saurodoma-out",
+        "Temple of Sylaveth - B1": "sylaveth-b1",
+        "Temple of Sylaveth - B2": "sylaveth-b2",
+    },
+    "talandre": {
+        "Swamp of Silence": "swamp-of-silence",
+        "Forest of the Great Tree": "the-great-tree",
+        "Black Anvil": "black-anvil",
+        "Crimson Mansion": "crimson-mansion",
+        "Quietis's Demise": "quietiss-demesne",
+        "Bercant Manor": "bercant-manor",
+    },
+    "talandre-dungeon": {
+        "Crimson Estate - B2 (3 Central Storage)": "crimson-b2",
+        "Crimson Estate - B2 (2 Central Prison)": "crimson-b2",
+        "Crimson Estate - B2 (1 Treatment Room)": "crimson-b2",
+        "Crimson Estate - B3 (Central Control Room)": "crimson-b3",
+        "Crimson Estate - B3 (Storage 1) (Not confirmed)": "crimson-b3",
+        "Crimson Estate - B3 (Storage 2) (Not confirmed)": "crimson-b3",
+        "Crimson Estate - B3 (Storage 3)": "crimson-b3",
+        "Crimson Estate - B3 (Storage 4) (Not confirmed)": "crimson-b3",
+        "Crimson Estate - B1": "crimson-b1",
+        "Temple of Truth - B1 (Not Confirmed)": "temple-of-truth-b1",
+        "Temple of Truth - B2 (Not confirmed)": "temple-of-truth-b2",
+        "Temple of Truth - 1F (Unknown)": "temple-of-truth-1f",
+        "Bercant Estate - 1F (Lord's Reception Chamber)": "bercant-1f",
+        "Bercant Estate - 1F (Banquet Hall)": "bercant-1f",
+        "Bercant Estate - 2F (Not confirmed)": "bercant-2f",
+        "Bercant Estate - B1": "bercant-b1",
+    },
+    "nix": {
+        "Tumgir Hollow": "tumgir-hollow",
+        "Stillreach": "stillreach",
+        "Frozen Nightlands": "frozen-nightlands",
+        "Entropic Tundra (cave)": "entropic-tundra",
+        "Scars of Sacrifice": "scar-of-sacrifice",
+    },
 }
 
 
@@ -191,3 +284,92 @@ async def sync_zone_from_fallback(
             return FallbackSyncResult.UNKNOWN_ZONE, None
 
         return FallbackSyncResult.APPLIED, zone_state
+
+
+def _find_poi_name(spots: object, poi_id: object) -> str | None:
+    if not isinstance(spots, list):
+        return None
+    for spot in spots:
+        if isinstance(spot, dict) and spot.get("id") == poi_id:
+            name = spot.get("name")
+            return name if isinstance(name, str) else None
+    return None
+
+
+def _parse_active_report_subzone(payload: object, zone_key: str, image_id: int) -> str | None:
+    """Pure parsing step, kept separate from the network call so it's
+    testable with plain dicts. Given the /region-scout payload, finds the
+    region matching image_id and resolves its activeReport (if any) to one
+    of our sub-zone keys via _SUBZONE_NAME_MAP. Returns None for any
+    unexpected shape, no active region/report, or an unmapped spot name —
+    this is an undocumented third-party endpoint that could change shape at
+    any time."""
+    if not isinstance(payload, dict):
+        return None
+    regions = payload.get("regions")
+    if not isinstance(regions, list):
+        return None
+
+    for region in regions:
+        if not isinstance(region, dict) or region.get("imageId") != image_id:
+            continue
+        active_report = region.get("activeReport")
+        if not isinstance(active_report, dict):
+            return None
+        poi_name = _find_poi_name(region.get("spots"), active_report.get("scoutPoiId"))
+        if poi_name is None:
+            return None
+        return _SUBZONE_NAME_MAP.get(zone_key, {}).get(poi_name)
+
+    return None
+
+
+async def fetch_found_subzone(
+    server_key: str, zone_key: str, *, timeout: float = 5.0
+) -> str | None:
+    """Returns the sub-zone key mmopartybuilder.eu currently has an active
+    "found here" report for, if any and if it maps to one of our sub-zones —
+    or None on absolutely any failure (bad mapping, network error, timeout,
+    non-200, unexpected JSON shape, no active report, unmapped spot name).
+    Never raises."""
+    target = _resolve_target(server_key, zone_key)
+    if target is None:
+        return None
+    map_id, image_id = target
+    url = f"{BASE_URL}/api/maps/{map_id}/region-scout"
+
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+            async with session.get(url) as response:
+                if response.status != 200:
+                    return None
+                payload = await response.json(content_type=None)
+    except Exception as exc:  # noqa: BLE001 - a third-party endpoint must never crash us
+        logger.warning("Found-watch fetch failed for %s/%s: %s", server_key, zone_key, exc)
+        return None
+
+    return _parse_active_report_subzone(payload, zone_key, image_id)
+
+
+async def check_and_apply_found(bot: "EliteBot", zone_key: str) -> bool:
+    """Checks mmopartybuilder.eu for a currently-active "found here" report
+    for this zone and, if one maps to one of our sub-zones, applies it
+    exactly like a member clicking 📍 would (posts the Elite Found
+    announcement, disables scout/found buttons). Returns True if applied.
+
+    Holds the zone's lock across the whole check (consistent with
+    sync_zone_from_fallback's pattern), so this never races a real member's
+    📍 click on the same zone."""
+    storage = bot.storage
+    async with storage.zone_lock(zone_key):
+        zone = storage.data["zones"].get(zone_key)
+        if zone is None or zone["found_this_cycle"]:
+            return False
+
+        server_key = storage.data["config"]["fallback_server"]
+        subzone_key = await fetch_found_subzone(server_key, zone_key)
+        if subzone_key is None or subzone_key not in zone["subzones"]:
+            return False
+
+        result = await mark_found_and_announce_locked(bot, zone_key, subzone_key)
+        return result is not None

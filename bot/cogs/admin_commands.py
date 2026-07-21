@@ -45,6 +45,151 @@ def _has_admin_access(interaction: discord.Interaction, bot: "EliteBot") -> bool
     return admin_role_id is not None and any(role.id == admin_role_id for role in member.roles)
 
 
+class FallbackConfigGroup(app_commands.Group):
+    """/elite-config fallback ... — nested so the mmopartybuilder.eu fallback
+    (timer-sync + found-watch) commands don't count against the parent
+    group's flat 25-command cap (see AdminConfigGroup.__init__)."""
+
+    def __init__(self, bot: "EliteBot") -> None:
+        super().__init__(
+            name="fallback",
+            description="Configure the mmopartybuilder.eu fallback timer sync / found-watch",
+        )
+        self.bot = bot
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        # Duplicated rather than inherited from AdminConfigGroup: a Group's
+        # interaction_check isn't looked up through its parent chain by
+        # discord.py, only through binding, so this must be self-contained.
+        if _has_admin_access(interaction, self.bot):
+            return True
+        await send_ephemeral(interaction, strings.NO_PERMISSION)
+        return False
+
+    @app_commands.command(
+        name="enabled",
+        description="Enable/disable checking mmopartybuilder.eu for stale zone timers",
+    )
+    @app_commands.describe(enabled="Whether to check mmopartybuilder.eu for missing/overdue timers")
+    async def enabled(self, interaction: discord.Interaction, enabled: bool) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            storage.data["config"]["fallback_enabled"] = enabled
+            await storage.save()
+
+        await send_ephemeral(interaction, strings.config_fallback_enabled_updated(enabled))
+
+    @app_commands.command(name="server", description="Set which PvP world the fallback timer sync checks")
+    @app_commands.describe(server="PvP world to pull timers from")
+    async def server(
+        self,
+        interaction: discord.Interaction,
+        server: Literal["sacred", "sophia", "indomitable", "usurper", "fearless"],
+    ) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            storage.data["config"]["fallback_server"] = server
+            await storage.save()
+
+        await send_ephemeral(
+            interaction, strings.config_fallback_server_updated(SERVER_DISPLAY_NAMES[server])
+        )
+
+    @app_commands.command(
+        name="threshold",
+        description="Set how overdue a zone's timer must be before fallback sync checks it",
+    )
+    @app_commands.describe(minutes="Minutes past/missing spawn time before checking mmopartybuilder.eu")
+    async def threshold(
+        self, interaction: discord.Interaction, minutes: app_commands.Range[int, 0, 1440]
+    ) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            storage.data["config"]["fallback_threshold_minutes"] = minutes
+            await storage.save()
+
+        await send_ephemeral(interaction, strings.config_fallback_threshold_updated(minutes))
+
+    @app_commands.command(
+        name="found-watch-enabled",
+        description="Enable/disable polling mmopartybuilder.eu's live scouting board for found locations",
+    )
+    @app_commands.describe(enabled="Whether to poll for a live \"found here\" report once a spawn is due")
+    async def found_watch_enabled(self, interaction: discord.Interaction, enabled: bool) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            storage.data["config"]["fallback_found_watch_enabled"] = enabled
+            await storage.save()
+
+        await send_ephemeral(interaction, strings.config_fallback_found_watch_enabled_updated(enabled))
+
+    @app_commands.command(
+        name="found-watch-attempts",
+        description="Set how many fast-phase attempts found-watch makes before slowing down",
+    )
+    @app_commands.describe(attempts="Number of ~20s ticks to check every time before backing off")
+    async def found_watch_attempts(
+        self, interaction: discord.Interaction, attempts: app_commands.Range[int, 1, 100]
+    ) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            storage.data["config"]["fallback_found_watch_attempts"] = attempts
+            await storage.save()
+
+        await send_ephemeral(interaction, strings.config_fallback_found_watch_attempts_updated(attempts))
+
+    @app_commands.command(
+        name="found-watch-interval",
+        description="Set how often found-watch checks once its fast-phase attempts are exhausted",
+    )
+    @app_commands.describe(minutes="Minutes between checks during the slow phase")
+    async def found_watch_interval(
+        self, interaction: discord.Interaction, minutes: app_commands.Range[int, 1, 1440]
+    ) -> None:
+        storage = self.bot.storage
+        async with storage.lock:
+            storage.data["config"]["fallback_found_watch_slow_interval_minutes"] = minutes
+            await storage.save()
+
+        await send_ephemeral(interaction, strings.config_fallback_found_watch_interval_updated(minutes))
+
+    @app_commands.command(name="sync", description="Force an immediate fallback timer sync for one zone")
+    @app_commands.describe(zone="Zone to sync against mmopartybuilder.eu")
+    @app_commands.autocomplete(zone=zone_autocomplete)
+    async def sync(self, interaction: discord.Interaction, zone: str) -> None:
+        storage = self.bot.storage
+        if zone not in storage.data["zones"]:
+            await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
+            return
+
+        zone_display_name = storage.data["zones"][zone]["display_name"]
+        await interaction.response.defer(ephemeral=True)
+        result, _ = await sync_zone_from_fallback(self.bot, zone)
+
+        await send_ephemeral(interaction, strings.fallback_sync_one_result(zone_display_name, result))
+        if result is FallbackSyncResult.APPLIED:
+            await self.bot.perpetual.force_update(self.bot, time.time())
+
+    @app_commands.command(
+        name="sync-all", description="Force an immediate fallback timer sync for every zone"
+    )
+    async def sync_all(self, interaction: discord.Interaction) -> None:
+        storage = self.bot.storage
+        await interaction.response.defer(ephemeral=True)
+
+        lines: list[str] = []
+        applied_any = False
+        for zone_key in list(storage.data["zones"].keys()):
+            zone_display_name = storage.data["zones"][zone_key]["display_name"]
+            result, _ = await sync_zone_from_fallback(self.bot, zone_key)
+            applied_any = applied_any or result is FallbackSyncResult.APPLIED
+            lines.append(strings.fallback_sync_result_line(zone_display_name, result))
+
+        await send_ephemeral(interaction, strings.FALLBACK_SYNC_ALL_HEADER + "\n" + "\n".join(lines))
+        if applied_any:
+            await self.bot.perpetual.force_update(self.bot, time.time())
+
+
 class AdminConfigGroup(app_commands.Group):
     def __init__(self, bot: "EliteBot") -> None:
         super().__init__(
@@ -54,6 +199,8 @@ class AdminConfigGroup(app_commands.Group):
             guild_only=True,
         )
         self.bot = bot
+        self.fallback_group = FallbackConfigGroup(bot)
+        self.add_command(self.fallback_group)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if _has_admin_access(interaction, self.bot):
@@ -181,52 +328,6 @@ class AdminConfigGroup(app_commands.Group):
             await storage.save()
 
         await send_ephemeral(interaction, strings.config_timezone_updated(tz))
-
-    @app_commands.command(
-        name="fallback-enabled",
-        description="Enable/disable checking mmopartybuilder.eu for stale zone timers",
-    )
-    @app_commands.describe(enabled="Whether to check mmopartybuilder.eu for missing/overdue timers")
-    async def fallback_enabled(self, interaction: discord.Interaction, enabled: bool) -> None:
-        storage = self.bot.storage
-        async with storage.lock:
-            storage.data["config"]["fallback_enabled"] = enabled
-            await storage.save()
-
-        await send_ephemeral(interaction, strings.config_fallback_enabled_updated(enabled))
-
-    @app_commands.command(
-        name="fallback-server", description="Set which PvP world the fallback timer sync checks"
-    )
-    @app_commands.describe(server="PvP world to pull timers from")
-    async def fallback_server(
-        self,
-        interaction: discord.Interaction,
-        server: Literal["sacred", "sophia", "indomitable", "usurper", "fearless"],
-    ) -> None:
-        storage = self.bot.storage
-        async with storage.lock:
-            storage.data["config"]["fallback_server"] = server
-            await storage.save()
-
-        await send_ephemeral(
-            interaction, strings.config_fallback_server_updated(SERVER_DISPLAY_NAMES[server])
-        )
-
-    @app_commands.command(
-        name="fallback-threshold",
-        description="Set how overdue a zone's timer must be before fallback sync checks it",
-    )
-    @app_commands.describe(minutes="Minutes past/missing spawn time before checking mmopartybuilder.eu")
-    async def fallback_threshold(
-        self, interaction: discord.Interaction, minutes: app_commands.Range[int, 0, 1440]
-    ) -> None:
-        storage = self.bot.storage
-        async with storage.lock:
-            storage.data["config"]["fallback_threshold_minutes"] = minutes
-            await storage.save()
-
-        await send_ephemeral(interaction, strings.config_fallback_threshold_updated(minutes))
 
     @app_commands.command(name="map", description="Upload/replace the map image for a zone")
     @app_commands.describe(
@@ -551,45 +652,6 @@ class AdminConfigGroup(app_commands.Group):
         )
 
     @app_commands.command(
-        name="fallback-sync", description="Force an immediate fallback timer sync for one zone"
-    )
-    @app_commands.describe(zone="Zone to sync against mmopartybuilder.eu")
-    @app_commands.autocomplete(zone=zone_autocomplete)
-    async def fallback_sync(self, interaction: discord.Interaction, zone: str) -> None:
-        storage = self.bot.storage
-        if zone not in storage.data["zones"]:
-            await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
-            return
-
-        zone_display_name = storage.data["zones"][zone]["display_name"]
-        await interaction.response.defer(ephemeral=True)
-        result, _ = await sync_zone_from_fallback(self.bot, zone)
-
-        await send_ephemeral(interaction, strings.fallback_sync_one_result(zone_display_name, result))
-        if result is FallbackSyncResult.APPLIED:
-            await self.bot.perpetual.force_update(self.bot, time.time())
-
-    @app_commands.command(
-        name="fallback-sync-all",
-        description="Force an immediate fallback timer sync for every zone",
-    )
-    async def fallback_sync_all(self, interaction: discord.Interaction) -> None:
-        storage = self.bot.storage
-        await interaction.response.defer(ephemeral=True)
-
-        lines: list[str] = []
-        applied_any = False
-        for zone_key in list(storage.data["zones"].keys()):
-            zone_display_name = storage.data["zones"][zone_key]["display_name"]
-            result, _ = await sync_zone_from_fallback(self.bot, zone_key)
-            applied_any = applied_any or result is FallbackSyncResult.APPLIED
-            lines.append(strings.fallback_sync_result_line(zone_display_name, result))
-
-        await send_ephemeral(interaction, strings.FALLBACK_SYNC_ALL_HEADER + "\n" + "\n".join(lines))
-        if applied_any:
-            await self.bot.perpetual.force_update(self.bot, time.time())
-
-    @app_commands.command(
         name="repost",
         description="Recreate the perpetual status message if it was deleted, or force a refresh",
     )
@@ -624,6 +686,11 @@ class AdminConfigGroup(app_commands.Group):
                 config["fallback_enabled"],
                 SERVER_DISPLAY_NAMES.get(config["fallback_server"], config["fallback_server"]),
                 config["fallback_threshold_minutes"],
+            ),
+            strings.config_show_fallback_found_watch_line(
+                config["fallback_found_watch_enabled"],
+                config["fallback_found_watch_attempts"],
+                config["fallback_found_watch_slow_interval_minutes"],
             ),
         ]
 

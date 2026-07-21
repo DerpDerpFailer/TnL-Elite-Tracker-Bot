@@ -245,8 +245,11 @@ def test_migrates_v9_dungeon_subzone_names_to_v10(tmp_path):
     )
 
     nix = storage.data["zones"]["nix"]
-    assert "scar-of-sacrifice" not in nix["subzones"]
-    assert "border-zone" in nix["subzones"]
+    # v10 replaced "Scar of Sacrifice" with "Border Zone"; v13 then renamed
+    # that same sub-zone again to its correct mmopartybuilder-derived name,
+    # so after the full migration chain it's "Scar of Sacrifice" once more.
+    assert "border-zone" not in nix["subzones"]
+    assert "scar-of-sacrifice" in nix["subzones"]
 
 
 def _v9_zone(display_name: str, cooldown_minutes: int, subzone_names: list[str]) -> dict:
@@ -334,8 +337,26 @@ def test_v10_migration_converges_with_a_fresh_seed(tmp_path):
                 360,
                 ["Frozen Nightlands", "Scar of Sacrifice", "Entropic Tundra", "Tumgir Hollow", "Stillreach"],
             ),
+            "talandre": _v9_zone(
+                "Talandre",
+                360,
+                [
+                    "Quietis Domain",
+                    "The Great Tree",
+                    "Swamp of Silence",
+                    "Black Anvil",
+                    "Bercant Manor",
+                    "Crimson Mansion",
+                ],
+            ),
         },
-        "history": {"laslan-dungeon": [], "stonegard-dungeon": [], "talandre-dungeon": [], "nix": []},
+        "history": {
+            "laslan-dungeon": [],
+            "stonegard-dungeon": [],
+            "talandre-dungeon": [],
+            "nix": [],
+            "talandre": [],
+        },
         "undo": {},
     }
     path.write_text(json.dumps(old_v9))
@@ -344,7 +365,7 @@ def test_v10_migration_converges_with_a_fresh_seed(tmp_path):
     storage.load_or_seed()
 
     fresh = build_seed_data()
-    for zone_key in ("laslan-dungeon", "stonegard-dungeon", "talandre-dungeon", "nix"):
+    for zone_key in ("laslan-dungeon", "stonegard-dungeon", "talandre-dungeon", "nix", "talandre"):
         migrated_keys = set(storage.data["zones"][zone_key]["subzones"].keys())
         fresh_keys = set(fresh["zones"][zone_key]["subzones"].keys())
         assert migrated_keys == fresh_keys, f"{zone_key}: migrated={migrated_keys} fresh={fresh_keys}"
@@ -410,6 +431,89 @@ def test_migrates_v11_backfills_fallback_config_defaults(tmp_path):
     assert config["fallback_enabled"] is False
     assert config["fallback_server"] == "sacred"
     assert config["fallback_threshold_minutes"] == 5
+
+
+def test_migrates_v12_renames_subzones_and_removes_crimson_1f(tmp_path):
+    path = tmp_path / "elite.json"
+    backup = tmp_path / "elite.json.bak"
+    old_v12 = {
+        "version": 12,
+        "config": {
+            "channel_id": None,
+            "alert_channel_id": None,
+            "alert_role_id": None,
+            "alert_offset_minutes": 15,
+            "timezone": "Europe/Paris",
+            "perpetual_message_id": None,
+            "admin_role_id": None,
+            "fallback_enabled": False,
+            "fallback_server": "sacred",
+            "fallback_threshold_minutes": 5,
+        },
+        "zones": {
+            "talandre": _v9_zone("Talandre", 360, ["Quietis Domain", "Black Anvil"]),
+            "nix": _v9_zone("Nix", 360, ["Border Zone", "Frozen Nightlands"]),
+            "talandre-dungeon": _v9_zone(
+                "Talandre Dungeon", 360, ["Crimson 1F", "Crimson B1"]
+            ),
+        },
+        "history": {"talandre": [], "nix": [], "talandre-dungeon": []},
+        "undo": {},
+    }
+    # give the sub-zone being renamed some scout state, to check it survives
+    old_v12["zones"]["talandre"]["subzones"]["quietis-domain"]["scouts"] = [99]
+    path.write_text(json.dumps(old_v12))
+
+    storage = Storage(path=path, backup_path=backup)
+    storage.load_or_seed()
+
+    talandre = storage.data["zones"]["talandre"]
+    assert "quietis-domain" not in talandre["subzones"]
+    assert talandre["subzones"]["quietiss-demesne"]["display_name"] == "Quietis's Demesne"
+    assert talandre["subzones"]["quietiss-demesne"]["scouts"] == [99]  # renamed, scouts preserved
+    assert "black-anvil" in talandre["subzones"]  # untouched
+
+    nix = storage.data["zones"]["nix"]
+    assert "border-zone" not in nix["subzones"]
+    assert nix["subzones"]["scar-of-sacrifice"]["display_name"] == "Scar of Sacrifice"
+    assert "frozen-nightlands" in nix["subzones"]  # untouched
+
+    talandre_dungeon = storage.data["zones"]["talandre-dungeon"]
+    assert "crimson-1f" not in talandre_dungeon["subzones"]
+    assert "crimson-b1" in talandre_dungeon["subzones"]  # untouched
+
+
+def test_migrates_v13_backfills_found_watch_config_defaults(tmp_path):
+    path = tmp_path / "elite.json"
+    backup = tmp_path / "elite.json.bak"
+    old_v13 = {
+        "version": 13,
+        "config": {
+            "channel_id": None,
+            "alert_channel_id": None,
+            "alert_role_id": None,
+            "alert_offset_minutes": 15,
+            "timezone": "Europe/Paris",
+            "perpetual_message_id": None,
+            "admin_role_id": None,
+            "fallback_enabled": False,
+            "fallback_server": "sacred",
+            "fallback_threshold_minutes": 5,
+        },
+        "zones": {"laslan": _v9_zone("Laslan", 240, ["Urstella Fields"])},
+        "history": {"laslan": []},
+        "undo": {},
+    }
+    path.write_text(json.dumps(old_v13))
+
+    storage = Storage(path=path, backup_path=backup)
+    storage.load_or_seed()
+
+    assert storage.data["version"] == SCHEMA_VERSION
+    config = storage.data["config"]
+    assert config["fallback_found_watch_enabled"] is False
+    assert config["fallback_found_watch_attempts"] == 10
+    assert config["fallback_found_watch_slow_interval_minutes"] == 15
 
 
 class TestZoneLock:

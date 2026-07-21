@@ -289,6 +289,106 @@ async def record_kill_and_close_scouting_locked(
     return zone_state
 
 
+async def mark_found_and_announce(
+    bot: "EliteBot", zone_key: str, subzone_key: str
+) -> ZoneState | None:
+    """Marks the zone found at this sub-zone, disables scout/found buttons on
+    every tracked scouting message (kill stays enabled — finding isn't
+    killing), and posts the pinged Elite Found announcement. Returns the
+    zone state, or None if the zone/sub-zone no longer exists.
+
+    Acquires the zone's lock itself — callers that already hold it must call
+    `mark_found_and_announce_locked` directly instead (asyncio.Lock isn't
+    reentrant), same reasoning as record_kill_and_close_scouting above."""
+    async with bot.storage.zone_lock(zone_key):
+        return await mark_found_and_announce_locked(bot, zone_key, subzone_key)
+
+
+async def mark_found_and_announce_locked(
+    bot: "EliteBot", zone_key: str, subzone_key: str
+) -> ZoneState | None:
+    """Same as `mark_found_and_announce`, but assumes the caller already
+    holds `storage.zone_lock(zone_key)` — e.g. bot/fallback.py's found-watch
+    loop, which checks mmopartybuilder.eu for a "found" report and needs the
+    lock held across that check."""
+    storage = bot.storage
+    zone = storage.data["zones"].get(zone_key)
+    if zone is None or subzone_key not in zone["subzones"]:
+        return None
+
+    zone_display_name = zone["display_name"]
+    subzone_display_name = zone["subzones"][subzone_key]["display_name"]
+    spawn_due = zone["spawn_due_marked"]
+    refs = zone["scouting_messages"]
+    domain.mark_found(storage.data, zone_key)
+    await storage.save()
+
+    announce_channel: discord.abc.Messageable | None = None
+    for index, ref in enumerate(refs):
+        try:
+            channel = bot.get_channel(ref["channel_id"])
+            if channel is None:
+                channel = await bot.fetch_channel(ref["channel_id"])
+            message = await channel.fetch_message(ref["message_id"])
+            # Finding isn't killing: leave the kill button enabled so
+            # whoever actually gets the kill can still report it.
+            disabled_view = ScoutingView(
+                bot,
+                zone_key,
+                ref["subzone_keys"],
+                show_kill_button=True,
+                scout_disabled=True,
+                found_disabled=True,
+            )
+            if index == 0:
+                announce_channel = channel
+                done_embed = build_scouting_embed(storage, zone_key, spawn_due=spawn_due)
+                done_embed.title = strings.scouting_done_title(zone_display_name)
+                done_embed.add_field(
+                    name="​",
+                    value=strings.scouting_found_note(subzone_display_name),
+                    inline=False,
+                )
+                await message.edit(embed=done_embed, view=disabled_view)
+            else:
+                await message.edit(view=disabled_view)
+        except discord.HTTPException as exc:
+            logger.warning("Failed to disable scouting buttons for %s: %s", zone_key, exc)
+
+    if announce_channel is None and refs:
+        try:
+            announce_channel = bot.get_channel(refs[0]["channel_id"])
+            if announce_channel is None:
+                announce_channel = await bot.fetch_channel(refs[0]["channel_id"])
+        except discord.HTTPException:
+            announce_channel = None
+
+    if announce_channel is not None:
+        role_id = storage.data["config"]["alert_role_id"]
+        role_mention = f"<@&{role_id}>" if role_id else None
+        found_embed, found_file = build_elite_found_embed(storage, zone_key, subzone_key)
+        found_view = FoundAnnouncementView(bot, zone_key, subzone_key)
+        try:
+            send_kwargs: dict = {
+                "content": role_mention,
+                "embed": found_embed,
+                "view": found_view,
+            }
+            if found_file is not None:
+                send_kwargs["file"] = found_file
+            announcement_message = await announce_channel.send(**send_kwargs)
+        except discord.HTTPException as exc:
+            logger.warning("Failed to send elite-found announcement for %s: %s", zone_key, exc)
+        else:
+            zone["found_announcement_message"] = {
+                "channel_id": announce_channel.id,
+                "message_id": announcement_message.id,
+            }
+            await storage.save()
+
+    return zone
+
+
 class ScoutingView(discord.ui.View):
     def __init__(
         self,
@@ -428,98 +528,19 @@ class ScoutingView(discord.ui.View):
         await send_ephemeral(interaction, confirmation, **ephemeral_kwargs)
 
     async def _on_found_click(self, interaction: discord.Interaction, subzone_key: str) -> None:
-        storage = self.bot.storage
-        async with storage.zone_lock(self.zone_key):
-            zone = storage.data["zones"].get(self.zone_key)
-            if zone is None or subzone_key not in zone["subzones"]:
-                await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
-                return
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.HTTPException as exc:
+            logger.warning(
+                "Failed to acknowledge elite-found click for %s: %s", self.zone_key, exc
+            )
 
-            zone_display_name = zone["display_name"]
-            subzone_display_name = zone["subzones"][subzone_key]["display_name"]
-            spawn_due = zone["spawn_due_marked"]
-            refs = zone["scouting_messages"]
-            domain.mark_found(storage.data, self.zone_key)
-            await storage.save()
+        zone_state = await mark_found_and_announce(self.bot, self.zone_key, subzone_key)
+        if zone_state is None:
+            await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
+            return
 
-            try:
-                await interaction.response.defer(ephemeral=True)
-            except discord.HTTPException as exc:
-                logger.warning(
-                    "Failed to acknowledge elite-found click for %s: %s", self.zone_key, exc
-                )
-
-            announce_channel: discord.abc.Messageable | None = None
-            for index, ref in enumerate(refs):
-                try:
-                    channel = self.bot.get_channel(ref["channel_id"])
-                    if channel is None:
-                        channel = await self.bot.fetch_channel(ref["channel_id"])
-                    message = await channel.fetch_message(ref["message_id"])
-                    # Finding isn't killing: leave the kill button enabled so
-                    # whoever actually gets the kill can still report it.
-                    disabled_view = ScoutingView(
-                        self.bot,
-                        self.zone_key,
-                        ref["subzone_keys"],
-                        show_kill_button=True,
-                        scout_disabled=True,
-                        found_disabled=True,
-                    )
-                    if index == 0:
-                        announce_channel = channel
-                        done_embed = build_scouting_embed(
-                            storage, self.zone_key, spawn_due=spawn_due
-                        )
-                        done_embed.title = strings.scouting_done_title(zone_display_name)
-                        done_embed.add_field(
-                            name="​",
-                            value=strings.scouting_found_note(subzone_display_name),
-                            inline=False,
-                        )
-                        await message.edit(embed=done_embed, view=disabled_view)
-                    else:
-                        await message.edit(view=disabled_view)
-                except discord.HTTPException as exc:
-                    logger.warning(
-                        "Failed to disable scouting buttons for %s: %s", self.zone_key, exc
-                    )
-
-            if announce_channel is None and refs:
-                try:
-                    announce_channel = self.bot.get_channel(refs[0]["channel_id"])
-                    if announce_channel is None:
-                        announce_channel = await self.bot.fetch_channel(refs[0]["channel_id"])
-                except discord.HTTPException:
-                    announce_channel = None
-
-            if announce_channel is not None:
-                role_id = storage.data["config"]["alert_role_id"]
-                role_mention = f"<@&{role_id}>" if role_id else None
-                found_embed, found_file = build_elite_found_embed(
-                    storage, self.zone_key, subzone_key
-                )
-                found_view = FoundAnnouncementView(self.bot, self.zone_key, subzone_key)
-                try:
-                    send_kwargs: dict = {
-                        "content": role_mention,
-                        "embed": found_embed,
-                        "view": found_view,
-                    }
-                    if found_file is not None:
-                        send_kwargs["file"] = found_file
-                    announcement_message = await announce_channel.send(**send_kwargs)
-                except discord.HTTPException as exc:
-                    logger.warning(
-                        "Failed to send elite-found announcement for %s: %s", self.zone_key, exc
-                    )
-                else:
-                    zone["found_announcement_message"] = {
-                        "channel_id": announce_channel.id,
-                        "message_id": announcement_message.id,
-                    }
-                    await storage.save()
-
+        subzone_display_name = zone_state["subzones"][subzone_key]["display_name"]
         confirmation = strings.found_confirmed(subzone_display_name)
         await send_ephemeral(interaction, confirmation)
 

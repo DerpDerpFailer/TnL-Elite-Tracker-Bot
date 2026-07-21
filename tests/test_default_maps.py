@@ -99,13 +99,13 @@ class TestRestoreBundledDefault:
         maps_dir = tmp_path / "maps"
         maps_dir.mkdir()
 
-        (images_dir / "Nix - Border Zone.png").write_bytes(b"bundled-default")
-        (maps_dir / "nix__border-zone.png").write_bytes(b"stale-test-placeholder")
+        (images_dir / "Nix - Scar of Sacrifice.png").write_bytes(b"bundled-default")
+        (maps_dir / "nix__scar-of-sacrifice.png").write_bytes(b"stale-test-placeholder")
 
-        restored = restore_bundled_default("nix", "border-zone", images_dir, maps_dir)
+        restored = restore_bundled_default("nix", "scar-of-sacrifice", images_dir, maps_dir)
 
         assert restored is True
-        assert (maps_dir / "nix__border-zone.png").read_bytes() == b"bundled-default"
+        assert (maps_dir / "nix__scar-of-sacrifice.png").read_bytes() == b"bundled-default"
 
     def test_deletes_the_override_when_no_bundled_default_exists(self, tmp_path):
         images_dir = tmp_path / "images"
@@ -139,16 +139,16 @@ class TestRestoreBundledDefaultsForZone:
         (images_dir / "Nix - Frozen Nightlands.png").write_bytes(b"bundled")
         (maps_dir / "nix.png").write_bytes(b"stale")
         (maps_dir / "nix__frozen-nightlands.png").write_bytes(b"stale")
-        (maps_dir / "nix__border-zone.png").write_bytes(b"stale")  # no bundled default
+        (maps_dir / "nix__no-such-subzone.png").write_bytes(b"stale")  # no bundled default
 
         restored, cleared = restore_bundled_defaults_for_zone(
             "nix",
-            ["frozen-nightlands", "border-zone"],
+            ["frozen-nightlands", "no-such-subzone"],
             images_dir,
             maps_dir,
         )
 
         assert restored == 2  # zone-level + frozen-nightlands
-        assert cleared == 1  # border-zone
+        assert cleared == 1  # no-such-subzone
         assert (maps_dir / "nix.png").read_bytes() == b"bundled"
-        assert not (maps_dir / "nix__border-zone.png").exists()
+        assert not (maps_dir / "nix__no-such-subzone.png").exists()

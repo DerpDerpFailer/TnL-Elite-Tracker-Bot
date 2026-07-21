@@ -270,6 +270,42 @@ class Storage:
             config.setdefault("fallback_threshold_minutes", 5)
             version = 12
 
+        if version < 13:
+            # v13: removes "Crimson 1F" from talandre-dungeon (added
+            # speculatively in case the zone ever got used, but
+            # mmopartybuilder reference data confirms it never is — no
+            # bundled map, no scoutable spot for it either), and corrects two
+            # sub-zone names against mmopartybuilder's live data: "Quietis
+            # Domain" -> "Quietis's Demesne" (its actual in-game name) and
+            # "Border Zone" -> "Scar of Sacrifice" (same physical spot,
+            # mmopartybuilder's name for it).
+            talandre_dungeon = self.data["zones"].get("talandre-dungeon")
+            if talandre_dungeon is not None:
+                talandre_dungeon["subzones"].pop(slugify("Crimson 1F"), None)
+
+            for zone_key, old_name, new_name in (
+                ("talandre", "Quietis Domain", "Quietis's Demesne"),
+                ("nix", "Border Zone", "Scar of Sacrifice"),
+            ):
+                zone = self.data["zones"].get(zone_key)
+                if zone is None:
+                    continue
+                subzones = zone["subzones"]
+                subzone = subzones.pop(slugify(old_name), None)
+                if subzone is not None:
+                    subzone["display_name"] = new_name
+                    subzones[slugify(new_name)] = subzone
+
+            version = 13
+
+        if version < 14:
+            # v14 adds the mmopartybuilder.eu "found" watch settings.
+            config = self.data["config"]
+            config.setdefault("fallback_found_watch_enabled", False)
+            config.setdefault("fallback_found_watch_attempts", 10)
+            config.setdefault("fallback_found_watch_slow_interval_minutes", 15)
+            version = 14
+
         if version != SCHEMA_VERSION:
             logger.warning(
                 "Data file version %s does not match expected %s after migrations; using as-is",

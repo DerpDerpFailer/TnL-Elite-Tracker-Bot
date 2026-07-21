@@ -211,11 +211,33 @@ indefinitely.
 
 | Command | Description |
 |---|---|
-| `/elite-config fallback-enabled enabled` | Turn fallback sync on/off. |
-| `/elite-config fallback-server server` | Which PvP world to check: Sacred, Sophia, Indomitable, Usurper, or Fearless. |
-| `/elite-config fallback-threshold minutes` | How overdue/missing a zone's timer must be before it's checked (default 5). |
-| `/elite-config fallback-sync zone` | Force an immediate check for one zone, regardless of the settings above. |
-| `/elite-config fallback-sync-all` | Force an immediate check for every zone. |
+| `/elite-config fallback enabled enabled` | Turn fallback sync on/off. |
+| `/elite-config fallback server server` | Which PvP world to check: Sacred, Sophia, Indomitable, Usurper, or Fearless. |
+| `/elite-config fallback threshold minutes` | How overdue/missing a zone's timer must be before it's checked (default 5). |
+| `/elite-config fallback sync zone` | Force an immediate check for one zone, regardless of the settings above. |
+| `/elite-config fallback sync-all` | Force an immediate check for every zone. |
+
+### Found-watch
+
+**Off by default.** While fallback sync only ever reports a zone-wide kill
+(no sub-zone), found-watch instead polls mmopartybuilder.eu's *live scouting
+board* for the same sub-zone-level "found here" report a member would submit
+by clicking 📍 — so if enabled, the bot can auto-detect and announce the
+Elite's location, not just its death. Polling starts the moment a zone's
+spawn window opens and stops as soon as it's found (by anyone, on Discord or
+the site) or the cycle moves on.
+
+It runs fast (every ~20s) for a configurable number of attempts, since
+that's when someone's most likely to already be actively scouting; once
+that budget is used up it backs off to a much slower interval, since quiet
+hours (e.g. early morning) can otherwise mean nobody reports for a long time
+and there's no point hammering the endpoint waiting for that.
+
+| Command | Description |
+|---|---|
+| `/elite-config fallback found-watch-enabled enabled` | Turn found-watch on/off. |
+| `/elite-config fallback found-watch-attempts attempts` | How many fast-phase (~20s) attempts before backing off (default 10). |
+| `/elite-config fallback found-watch-interval minutes` | How often it checks once the fast-phase attempts are exhausted (default 15). |
 
 ## Deploying with Portainer
 
@@ -328,11 +350,14 @@ finer-grained control.
 | `/elite-config preview-zone zone` | Show every map image for a zone (its own map plus every sub-zone's), noting any that haven't been uploaded yet — handy for checking the bundled/uploaded maps landed correctly. |
 | `/elite-config preview-map zone [subzone]` | Show the map image for one specific zone or sub-zone. |
 | `/elite-config reset-maps zone` | Delete a zone's map overrides (its own + every sub-zone's) and restore the bundled defaults. Use this if a stale/placeholder upload from before a zone had a bundled default is blocking it — `/elite-config map`/`submap` never get auto-replaced otherwise. |
-| `/elite-config fallback-enabled enabled` | Turn the [mmopartybuilder.eu fallback timer sync](#fallback-timer-sync) on/off (off by default). |
-| `/elite-config fallback-server server` | Which PvP world the fallback sync checks. |
-| `/elite-config fallback-threshold minutes` | How overdue/missing a zone's timer must be before fallback sync checks it. |
-| `/elite-config fallback-sync zone` | Force an immediate fallback check for one zone. |
-| `/elite-config fallback-sync-all` | Force an immediate fallback check for every zone. |
+| `/elite-config fallback enabled enabled` | Turn the [mmopartybuilder.eu fallback timer sync](#fallback-timer-sync) on/off (off by default). |
+| `/elite-config fallback server server` | Which PvP world the fallback sync checks. |
+| `/elite-config fallback threshold minutes` | How overdue/missing a zone's timer must be before fallback sync checks it. |
+| `/elite-config fallback sync zone` | Force an immediate fallback check for one zone. |
+| `/elite-config fallback sync-all` | Force an immediate fallback check for every zone. |
+| `/elite-config fallback found-watch-enabled enabled` | Turn [found-watch](#found-watch) on/off (off by default). |
+| `/elite-config fallback found-watch-attempts attempts` | How many fast-phase attempts found-watch makes before backing off (default 10). |
+| `/elite-config fallback found-watch-interval minutes` | How often found-watch checks once its fast-phase attempts are exhausted (default 15). |
 | `/elite-config repost` | Recreate the perpetual status message if it was deleted by accident, or force an immediate refresh. |
 | `/elite-config show` | Show the full current configuration (channel, roles, offset, timezone, zones with their cooldowns and sub-zone counts) in one embed. |
 
@@ -357,11 +382,14 @@ Examples:
 /elite-config preview-zone zone:Nix
 /elite-config preview-map zone:Laslan subzone:Urstella Fields
 /elite-config reset-maps zone:Nix
-/elite-config fallback-enabled enabled:True
-/elite-config fallback-server server:Sacred
-/elite-config fallback-threshold minutes:5
-/elite-config fallback-sync zone:Nix
-/elite-config fallback-sync-all
+/elite-config fallback enabled enabled:True
+/elite-config fallback server server:Sacred
+/elite-config fallback threshold minutes:5
+/elite-config fallback sync zone:Nix
+/elite-config fallback sync-all
+/elite-config fallback found-watch-enabled enabled:True
+/elite-config fallback found-watch-attempts attempts:10
+/elite-config fallback found-watch-interval minutes:15
 /elite-config repost
 /elite-config show
 ```

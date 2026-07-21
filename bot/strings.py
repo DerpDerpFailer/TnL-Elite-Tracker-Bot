@@ -469,6 +469,23 @@ def config_fallback_threshold_updated(minutes: int) -> str:
     )
 
 
+def config_fallback_found_watch_enabled_updated(enabled: bool) -> str:
+    if enabled:
+        return (
+            "Found-watch **enabled** — once a zone's spawn window opens, mmopartybuilder.eu's live "
+            "scouting board will be polled for a \"found here\" report until one arrives."
+        )
+    return "Found-watch **disabled**."
+
+
+def config_fallback_found_watch_attempts_updated(attempts: int) -> str:
+    return f"Found-watch will now poll every tick for the first {attempts} attempt(s) before slowing down."
+
+
+def config_fallback_found_watch_interval_updated(minutes: int) -> str:
+    return f"Found-watch's slow-phase interval is now {minutes} minute(s)."
+
+
 FALLBACK_SYNC_ALL_HEADER = "Fallback sync results:"
 
 # Keyed by the plain string value (not the FallbackSyncResult enum member
@@ -536,6 +553,17 @@ def config_show_fallback_line(enabled: bool, server_display_name: str, threshold
     return (
         f"**Fallback sync:** enabled ({server_display_name}, triggers "
         f"{threshold_minutes}m after a spawn time is missing/overdue)"
+    )
+
+
+def config_show_fallback_found_watch_line(
+    enabled: bool, attempts: int, slow_interval_minutes: int
+) -> str:
+    if not enabled:
+        return "**Found-watch:** disabled"
+    return (
+        f"**Found-watch:** enabled ({attempts} fast attempt(s), then every "
+        f"{slow_interval_minutes}m)"
     )
 
 

@@ -18,7 +18,7 @@ from discord.ext import tasks
 
 from bot import strings
 from bot.constants import MAPS_DIR
-from bot.fallback import FallbackSyncResult, sync_zone_from_fallback
+from bot.fallback import FallbackSyncResult, check_and_apply_found, sync_zone_from_fallback
 from bot.models import ZoneState
 from bot.perpetual_message import PerpetualMessageManager
 from bot.scouting import ScoutingView, build_scouting_embed, chunk_subzone_keys
@@ -31,32 +31,53 @@ logger = logging.getLogger(__name__)
 # effort, unofficial) fallback endpoint every 30s tick forever.
 FALLBACK_RETRY_SECONDS = 300
 
+FOUND_WATCH_INTERVAL_SECONDS = 20
+
 
 class AlertManager:
     def __init__(self, storage: Storage, perpetual: PerpetualMessageManager) -> None:
         self.storage = storage
         self.perpetual = perpetual
         self._loop: tasks.Loop | None = None
+        self._found_watch_loop: tasks.Loop | None = None
         self._last_fallback_attempt: dict[str, float] = {}
+        # zone_key -> {"spawn_at": float, "attempts": int, "last_check": float},
+        # in-memory only (a restart just resets the count, which is harmless —
+        # see check_found_watch).
+        self._found_watch_state: dict[str, dict] = {}
 
     def start(self, bot: discord.Client) -> None:
-        if self._loop is not None:
-            return
+        if self._loop is None:
 
-        @tasks.loop(seconds=30)
-        async def loop() -> None:
-            await self.check_spawns(bot)
+            @tasks.loop(seconds=30)
+            async def loop() -> None:
+                await self.check_spawns(bot)
 
-        @loop.before_loop
-        async def before() -> None:
-            await bot.wait_until_ready()
+            @loop.before_loop
+            async def before() -> None:
+                await bot.wait_until_ready()
 
-        self._loop = loop
-        self._loop.start()
+            self._loop = loop
+            self._loop.start()
+
+        if self._found_watch_loop is None:
+
+            @tasks.loop(seconds=FOUND_WATCH_INTERVAL_SECONDS)
+            async def found_watch_loop() -> None:
+                await self.check_found_watch(bot)
+
+            @found_watch_loop.before_loop
+            async def before_found_watch() -> None:
+                await bot.wait_until_ready()
+
+            self._found_watch_loop = found_watch_loop
+            self._found_watch_loop.start()
 
     def stop(self) -> None:
         if self._loop is not None:
             self._loop.cancel()
+        if self._found_watch_loop is not None:
+            self._found_watch_loop.cancel()
 
     async def check_spawns(self, bot: discord.Client) -> None:
         now = time.time()
@@ -241,4 +262,52 @@ class AlertManager:
                 logger.info(
                     "Fallback sync applied a newer kill for %s from mmopartybuilder.eu", zone_key
                 )
+                self.perpetual.mark_dirty()
+
+    async def check_found_watch(self, bot: discord.Client) -> None:
+        """While a zone's spawn window is open and nobody has reported a
+        "found" location yet (via a member's 📍 click or a real-time report),
+        polls mmopartybuilder.eu's live scouting board for the same info —
+        see bot/fallback.py:check_and_apply_found. Runs fast (every tick)
+        for the first `fallback_found_watch_attempts` checks, since that's
+        when a member is most likely to be actively scouting; after that it
+        backs off to once every `fallback_found_watch_slow_interval_minutes`,
+        since quiet hours (e.g. early morning) can otherwise mean nobody
+        reports for a long time and there's no point hammering the endpoint
+        every 20s waiting for that."""
+        config = self.storage.data["config"]
+        if not config["fallback_found_watch_enabled"]:
+            return
+
+        now = time.time()
+        attempts_limit = config["fallback_found_watch_attempts"]
+        slow_interval_seconds = config["fallback_found_watch_slow_interval_minutes"] * 60
+
+        # Snapshot via list() — this loop awaits between zones, so a
+        # concurrent zone-add/zone-remove could otherwise mutate the dict
+        # mid-iteration (same reasoning as _check_fallback above).
+        for zone_key, zone in list(self.storage.data["zones"].items()):
+            if not zone["spawn_due_marked"] or zone["found_this_cycle"] or zone["spawn_at"] is None:
+                self._found_watch_state.pop(zone_key, None)
+                continue
+
+            state = self._found_watch_state.get(zone_key)
+            if state is None or state["spawn_at"] != zone["spawn_at"]:
+                state = {"spawn_at": zone["spawn_at"], "attempts": 0, "last_check": 0.0}
+                self._found_watch_state[zone_key] = state
+
+            in_fast_phase = state["attempts"] < attempts_limit
+            if not in_fast_phase and now - state["last_check"] < slow_interval_seconds:
+                continue
+
+            state["attempts"] += 1
+            state["last_check"] = now
+
+            applied = await check_and_apply_found(bot, zone_key)
+            if applied:
+                logger.info(
+                    "Found-watch applied a live location report for %s from mmopartybuilder.eu",
+                    zone_key,
+                )
+                self._found_watch_state.pop(zone_key, None)
                 self.perpetual.mark_dirty()

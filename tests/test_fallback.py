@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+from bot import strings
 from bot.alerts import AlertManager
-from bot.constants import DEFAULT_ZONES
+from bot.constants import DEFAULT_SUBZONES, DEFAULT_ZONES
 from bot.fallback import (
     SERVERS,
     FallbackSyncResult,
+    _parse_active_report_subzone,
     _parse_region_timer_cooldown_reset,
     _resolve_target,
+    _SUBZONE_NAME_MAP,
+    check_and_apply_found,
+    fetch_found_subzone,
     fetch_zone_kill_time,
     sync_zone_from_fallback,
 )
-from bot import strings
 from bot.perpetual_message import PerpetualMessageManager
+from bot.slugs import slugify
 from tests.fakes import FakeBot, FakeChannel
 
 
@@ -280,6 +285,185 @@ class TestSyncZoneFromFallback:
         assert result is FallbackSyncResult.APPLIED
         assert zone_state["last_kill_at"] == 1000.0
         assert channel.sent == []  # nothing to announce, no channel to send to
+
+
+class TestSubzoneNameMap:
+    def test_covers_every_zone_eligible_for_fallback(self):
+        from bot.fallback import _ZONE_OFFSETS
+
+        assert set(_SUBZONE_NAME_MAP.keys()) == set(_ZONE_OFFSETS.keys())
+
+    def test_every_mapped_value_is_a_real_default_subzone(self):
+        for zone_key, spots in _SUBZONE_NAME_MAP.items():
+            valid_keys = {slugify(name) for name in DEFAULT_SUBZONES[zone_key]}
+            for spot_name, subzone_key in spots.items():
+                assert subzone_key in valid_keys, (
+                    f"{zone_key}/{spot_name!r} maps to {subzone_key!r}, "
+                    f"which isn't a default sub-zone of {zone_key}"
+                )
+
+
+class TestParseActiveReportSubzone:
+    def _payload(self, active_report=None, spots=None, image_id=23):
+        return {
+            "regions": [
+                {
+                    "imageId": image_id,
+                    "spots": spots if spots is not None else [],
+                    "activeReport": active_report,
+                }
+            ]
+        }
+
+    def test_resolves_a_mapped_spot_name_to_our_subzone_key(self):
+        payload = self._payload(
+            active_report={"scoutPoiId": 5},
+            spots=[{"id": 5, "name": "Urstella Fields"}],
+        )
+        assert _parse_active_report_subzone(payload, "laslan", 23) == "urstella-fields"
+
+    def test_no_region_matching_image_id_returns_none(self):
+        payload = self._payload(active_report={"scoutPoiId": 5}, spots=[{"id": 5, "name": "Urstella Fields"}])
+        assert _parse_active_report_subzone(payload, "laslan", 999) is None
+
+    def test_no_active_report_returns_none(self):
+        payload = self._payload(active_report=None)
+        assert _parse_active_report_subzone(payload, "laslan", 23) is None
+
+    def test_unmapped_spot_name_returns_none(self):
+        payload = self._payload(
+            active_report={"scoutPoiId": 5},
+            spots=[{"id": 5, "name": "Some Brand New Spot"}],
+        )
+        assert _parse_active_report_subzone(payload, "laslan", 23) is None
+
+    def test_scout_poi_id_not_found_among_spots_returns_none(self):
+        payload = self._payload(active_report={"scoutPoiId": 999}, spots=[{"id": 5, "name": "Urstella Fields"}])
+        assert _parse_active_report_subzone(payload, "laslan", 23) is None
+
+    def test_regions_not_a_list_returns_none(self):
+        assert _parse_active_report_subzone({"regions": "not-a-list"}, "laslan", 23) is None
+
+    def test_payload_not_a_dict_returns_none(self):
+        assert _parse_active_report_subzone(["unexpected"], "laslan", 23) is None
+        assert _parse_active_report_subzone(None, "laslan", 23) is None
+
+    def test_active_report_not_a_dict_returns_none(self):
+        payload = self._payload(active_report="not-a-dict")
+        assert _parse_active_report_subzone(payload, "laslan", 23) is None
+
+    def test_spots_not_a_list_returns_none(self):
+        payload = {
+            "regions": [{"imageId": 23, "spots": "not-a-list", "activeReport": {"scoutPoiId": 5}}]
+        }
+        assert _parse_active_report_subzone(payload, "laslan", 23) is None
+
+
+class TestFetchFoundSubzone:
+    async def test_returns_the_mapped_subzone_on_success(self, monkeypatch):
+        payload = {
+            "regions": [
+                {
+                    "imageId": 23,
+                    "spots": [{"id": 5, "name": "Urstella Fields"}],
+                    "activeReport": {"scoutPoiId": 5},
+                }
+            ]
+        }
+        monkeypatch.setattr(
+            "bot.fallback.aiohttp.ClientSession",
+            lambda *a, **k: _FakeSession(response=_FakeResponse(200, payload)),
+        )
+        result = await fetch_found_subzone("sacred", "laslan")
+        assert result == "urstella-fields"
+
+    async def test_non_200_status_returns_none(self, monkeypatch):
+        monkeypatch.setattr(
+            "bot.fallback.aiohttp.ClientSession",
+            lambda *a, **k: _FakeSession(response=_FakeResponse(500)),
+        )
+        assert await fetch_found_subzone("sacred", "laslan") is None
+
+    async def test_network_error_returns_none_instead_of_raising(self, monkeypatch):
+        monkeypatch.setattr(
+            "bot.fallback.aiohttp.ClientSession",
+            lambda *a, **k: _FakeSession(exc=ConnectionError("boom")),
+        )
+        assert await fetch_found_subzone("sacred", "laslan") is None
+
+    async def test_timeout_returns_none_instead_of_raising(self, monkeypatch):
+        monkeypatch.setattr(
+            "bot.fallback.aiohttp.ClientSession",
+            lambda *a, **k: _FakeSession(exc=TimeoutError("too slow")),
+        )
+        assert await fetch_found_subzone("sacred", "laslan") is None
+
+    async def test_unmapped_zone_returns_none_without_a_network_call(self, monkeypatch):
+        def _boom(*a, **k):
+            raise AssertionError("should not attempt a network call for an unmapped zone")
+
+        monkeypatch.setattr("bot.fallback.aiohttp.ClientSession", _boom)
+        assert await fetch_found_subzone("sacred", "a-custom-zone") is None
+
+
+class TestCheckAndApplyFound:
+    async def test_applies_a_mapped_found_report_and_posts_the_announcement(
+        self, storage, channel, bot, monkeypatch
+    ):
+        mgr = AlertManager(storage, PerpetualMessageManager(storage))
+        zone = storage.data["zones"]["nix"]
+        await mgr._send_pre_alert(bot, channel, "nix", zone, role_mention=None)
+
+        async def fake_fetch(server_key, zone_key, **kwargs):
+            return "scar-of-sacrifice"
+
+        monkeypatch.setattr("bot.fallback.fetch_found_subzone", fake_fetch)
+
+        applied = await check_and_apply_found(bot, "nix")
+
+        assert applied is True
+        assert zone["found_this_cycle"] is True
+        found_embed = channel.sent[-1]["embed"]
+        assert found_embed.title is not None  # Elite Found announcement went out
+
+    async def test_returns_false_and_skips_fetch_when_already_found_this_cycle(
+        self, storage, bot, monkeypatch
+    ):
+        storage.data["zones"]["nix"]["found_this_cycle"] = True
+
+        def _boom(*a, **k):
+            raise AssertionError("should not fetch when already found this cycle")
+
+        monkeypatch.setattr("bot.fallback.fetch_found_subzone", _boom)
+
+        assert await check_and_apply_found(bot, "nix") is False
+
+    async def test_returns_false_when_fetch_finds_nothing(self, storage, bot, monkeypatch):
+        async def fake_fetch(server_key, zone_key, **kwargs):
+            return None
+
+        monkeypatch.setattr("bot.fallback.fetch_found_subzone", fake_fetch)
+
+        assert await check_and_apply_found(bot, "nix") is False
+        assert storage.data["zones"]["nix"]["found_this_cycle"] is False
+
+    async def test_returns_false_when_mapped_subzone_is_not_one_of_the_zones_subzones(
+        self, storage, bot, monkeypatch
+    ):
+        async def fake_fetch(server_key, zone_key, **kwargs):
+            return "no-such-subzone"
+
+        monkeypatch.setattr("bot.fallback.fetch_found_subzone", fake_fetch)
+
+        assert await check_and_apply_found(bot, "nix") is False
+
+    async def test_unknown_zone_returns_false_without_a_fetch(self, storage, bot, monkeypatch):
+        def _boom(*a, **k):
+            raise AssertionError("should not fetch for an unknown zone")
+
+        monkeypatch.setattr("bot.fallback.fetch_found_subzone", _boom)
+
+        assert await check_and_apply_found(bot, "no-such-zone") is False
 
 
 def test_servers_table_has_a_display_name_for_every_server():

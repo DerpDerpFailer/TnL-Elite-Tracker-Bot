@@ -129,7 +129,7 @@ class TestPreviewZone:
         by_title = {e.title: e for e in embeds}
         assert by_title["Nix"].image.url == "attachment://nix.png"
         assert by_title["Frozen Nightlands"].image.url == "attachment://nix__frozen-nightlands.png"
-        assert by_title["Border Zone"].description == "No map uploaded yet."
+        assert by_title["Scar of Sacrifice"].description == "No map uploaded yet."
         assert len(kwargs["files"]) == 2
         assert kwargs["ephemeral"] is False  # visible to the whole channel
 
@@ -137,11 +137,15 @@ class TestPreviewZone:
         self, bot, tmp_path, monkeypatch
     ):
         monkeypatch.setattr("bot.cogs.admin_commands.MAPS_DIR", tmp_path)
+        # a fresh zone with exactly 10 sub-zones + its own map = 11 entries,
+        # forcing a 2nd chunk regardless of how any real zone is configured
+        domain.add_zone(bot.storage.data, "big-zone", "Big Zone", 240)
+        for i in range(10):
+            domain.add_subzone(bot.storage.data, "big-zone", f"spot-{i}", f"Spot {i}")
         cog = _cog(bot)
         interaction = FakeInteraction()
 
-        # talandre-dungeon has 10 sub-zones + its own zone map = 11 entries
-        await cog.preview_zone.callback(cog, interaction, "talandre-dungeon")
+        await cog.preview_zone.callback(cog, interaction, "big-zone")
 
         first_content, first_kwargs = interaction.response.send_message_calls[0]
         assert len(first_kwargs["embeds"]) == 10
@@ -204,7 +208,7 @@ class TestResetMaps:
         await cog.reset_maps.callback(cog, interaction, "nix")
 
         assert calls == [
-            ("nix", ["border-zone", "entropic-tundra", "frozen-nightlands", "stillreach", "tumgir-hollow"])
+            ("nix", ["entropic-tundra", "frozen-nightlands", "scar-of-sacrifice", "stillreach", "tumgir-hollow"])
         ]
         content, kwargs = interaction.response.send_message_calls[0]
         assert content == "Reset maps for **Nix**: 3 restored to the bundled default, 1 cleared (no bundled default exists for them)."
@@ -223,9 +227,10 @@ class TestResetMaps:
 class TestFallbackConfigCommands:
     async def test_fallback_enabled_updates_config(self, bot):
         cog = _cog(bot)
+        group = cog.fallback_group
         interaction = FakeInteraction()
 
-        await cog.fallback_enabled.callback(cog, interaction, True)
+        await group.enabled.callback(group, interaction, True)
 
         assert bot.storage.data["config"]["fallback_enabled"] is True
         content, _ = interaction.response.send_message_calls[0]
@@ -233,9 +238,10 @@ class TestFallbackConfigCommands:
 
     async def test_fallback_server_updates_config(self, bot):
         cog = _cog(bot)
+        group = cog.fallback_group
         interaction = FakeInteraction()
 
-        await cog.fallback_server.callback(cog, interaction, "sophia")
+        await group.server.callback(group, interaction, "sophia")
 
         assert bot.storage.data["config"]["fallback_server"] == "sophia"
         content, _ = interaction.response.send_message_calls[0]
@@ -243,13 +249,49 @@ class TestFallbackConfigCommands:
 
     async def test_fallback_threshold_updates_config(self, bot):
         cog = _cog(bot)
+        group = cog.fallback_group
         interaction = FakeInteraction()
 
-        await cog.fallback_threshold.callback(cog, interaction, 10)
+        await group.threshold.callback(group, interaction, 10)
 
         assert bot.storage.data["config"]["fallback_threshold_minutes"] == 10
         content, _ = interaction.response.send_message_calls[0]
         assert "10" in content
+
+
+class TestFallbackFoundWatchConfigCommands:
+    async def test_fallback_found_watch_enabled_updates_config(self, bot):
+        cog = _cog(bot)
+        group = cog.fallback_group
+        interaction = FakeInteraction()
+
+        await group.found_watch_enabled.callback(group, interaction, True)
+
+        assert bot.storage.data["config"]["fallback_found_watch_enabled"] is True
+        content, _ = interaction.response.send_message_calls[0]
+        assert "enabled" in content.lower()
+
+    async def test_fallback_found_watch_attempts_updates_config(self, bot):
+        cog = _cog(bot)
+        group = cog.fallback_group
+        interaction = FakeInteraction()
+
+        await group.found_watch_attempts.callback(group, interaction, 5)
+
+        assert bot.storage.data["config"]["fallback_found_watch_attempts"] == 5
+        content, _ = interaction.response.send_message_calls[0]
+        assert "5" in content
+
+    async def test_fallback_found_watch_interval_updates_config(self, bot):
+        cog = _cog(bot)
+        group = cog.fallback_group
+        interaction = FakeInteraction()
+
+        await group.found_watch_interval.callback(group, interaction, 20)
+
+        assert bot.storage.data["config"]["fallback_found_watch_slow_interval_minutes"] == 20
+        content, _ = interaction.response.send_message_calls[0]
+        assert "20" in content
 
 
 class TestFallbackSyncCommands:
@@ -265,8 +307,9 @@ class TestFallbackSyncCommands:
         bot.perpetual = _FakePerpetual()
 
         cog = _cog(bot)
+        group = cog.fallback_group
         interaction = FakeInteraction()
-        await cog.fallback_sync.callback(cog, interaction, "nix")
+        await group.sync.callback(group, interaction, "nix")
 
         assert interaction.response.defer_calls == 1
         content, _ = interaction.followup.sent[0]
@@ -276,9 +319,10 @@ class TestFallbackSyncCommands:
 
     async def test_fallback_sync_unknown_zone_reports_error_without_deferring(self, bot):
         cog = _cog(bot)
+        group = cog.fallback_group
         interaction = FakeInteraction()
 
-        await cog.fallback_sync.callback(cog, interaction, "nowhere")
+        await group.sync.callback(group, interaction, "nowhere")
 
         assert interaction.response.defer_calls == 0
         content, _ = interaction.response.send_message_calls[0]
@@ -296,8 +340,9 @@ class TestFallbackSyncCommands:
         bot.perpetual = _FakePerpetual()
 
         cog = _cog(bot)
+        group = cog.fallback_group
         interaction = FakeInteraction()
-        await cog.fallback_sync_all.callback(cog, interaction)
+        await group.sync_all.callback(group, interaction)
 
         assert interaction.response.defer_calls == 1
         content, _ = interaction.followup.sent[0]
