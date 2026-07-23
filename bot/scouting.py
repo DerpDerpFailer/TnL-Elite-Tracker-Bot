@@ -20,13 +20,16 @@ re-enables 🔍/📍 on the scouting message(s) and deletes the announcement.
 
 Discord caps a message at 5 action rows, so with one sub-zone per row a zone
 can show at most 5 sub-zones per message; zones with more get their buttons
-spread across several messages. Only the first ("primary") message carries
-the embed. `zone["scouting_messages"]` and `zone["found_announcement_message"]`
-track every message sent for the current cycle (channel/message id + which
-sub-zone keys each scouting message holds), which is what lets 📍/💀 reach
-and update/delete every one of them, not just the one that was clicked.
-Every view here is persistent (`timeout=None`) and re-registered at startup
-via `bot.add_view(...)` so clicks keep working on old alert messages after a
+spread across several messages. Only the first ("primary") message *per
+installed guild* carries the embed (see group_refs_by_guild). Both
+`zone["scouting_messages"]` and `zone["found_announcement_messages"]` are
+guild-tagged lists tracking every message sent for the current cycle, across
+every installed guild (channel/message id + which sub-zone keys each
+scouting message holds), which is what lets 📍/💀 reach and update/delete
+every one of them, in every guild, not just the one that was clicked — a
+report on one server is mirrored to every other installed server. Every view
+here is persistent (`timeout=None`) and re-registered at startup via
+`bot.add_view(...)` so clicks keep working on old alert messages after a
 restart.
 """
 from __future__ import annotations
@@ -80,6 +83,18 @@ def found_undo_custom_id_for(zone_key: str, subzone_key: str) -> str:
 def chunk_subzone_keys(zone: ZoneState, chunk_size: int = MAX_ROWS_PER_MESSAGE) -> list[list[str]]:
     keys = list(zone["subzones"].keys())
     return [keys[i : i + chunk_size] for i in range(0, len(keys), chunk_size)]
+
+
+def group_refs_by_guild(refs: list[dict]) -> dict[int, list[dict]]:
+    """Groups a flat list of guild-tagged message refs (ScoutingMessageRef or
+    MessageRef) by guild_id, preserving order — each installed guild gets its
+    own copy of a zone's scouting/found messages, and within a guild's group
+    the first ref is that guild's "primary" message (the one carrying the
+    embed; any others are chunk-continuation messages, view-only)."""
+    groups: dict[int, list[dict]] = {}
+    for ref in refs:
+        groups.setdefault(ref["guild_id"], []).append(ref)
+    return groups
 
 
 def build_scouting_embed(
@@ -252,7 +267,7 @@ async def record_kill_and_close_scouting_locked(
 
     subzone_display_name = zone["subzones"][subzone_key]["display_name"] if has_subzone else None
     scouting_refs = list(zone["scouting_messages"])
-    found_ref = zone["found_announcement_message"]
+    found_refs = list(zone["found_announcement_messages"])
 
     kill_ts = timestamp if timestamp is not None else time.time()
     zone_state = domain.record_kill(
@@ -262,17 +277,20 @@ async def record_kill_and_close_scouting_locked(
 
     for ref in scouting_refs:
         await _delete_tracked_message(bot, zone_key, ref, "scouting message")
+    for ref in found_refs:
+        await _delete_tracked_message(bot, zone_key, ref, "elite-found announcement")
 
-    if found_ref is not None:
-        await _delete_tracked_message(bot, zone_key, found_ref, "elite-found announcement")
+    # One "Boss killed" summary per guild that had a live scouting/found
+    # message — each guild's own channel, same as the alerts it's replacing.
+    # A guild's scouting channel takes priority over its found-announcement
+    # channel (matches which one used to win when there was only one guild).
+    target_channels: dict[int, int] = {}
+    for ref in scouting_refs:
+        target_channels.setdefault(ref["guild_id"], ref["channel_id"])
+    for ref in found_refs:
+        target_channels.setdefault(ref["guild_id"], ref["channel_id"])
 
-    target_channel = None
-    if scouting_refs:
-        target_channel = await _resolve_channel(bot, scouting_refs[0]["channel_id"])
-    elif found_ref is not None:
-        target_channel = await _resolve_channel(bot, found_ref["channel_id"])
-
-    if target_channel is not None:
+    if target_channels:
         reported_by = reported_by_display if reported_by_display is not None else f"<@{user_id}>"
         killed_embed = build_boss_killed_embed(
             zone_state["display_name"],
@@ -281,10 +299,14 @@ async def record_kill_and_close_scouting_locked(
             reported_by,
             zone_state["spawn_at"],
         )
-        try:
-            await target_channel.send(embed=killed_embed)
-        except discord.HTTPException as exc:
-            logger.warning("Failed to send boss-killed summary for %s: %s", zone_key, exc)
+        for channel_id in target_channels.values():
+            target_channel = await _resolve_channel(bot, channel_id)
+            if target_channel is None:
+                continue
+            try:
+                await target_channel.send(embed=killed_embed)
+            except discord.HTTPException as exc:
+                logger.warning("Failed to send boss-killed summary for %s: %s", zone_key, exc)
 
     return zone_state
 
@@ -319,52 +341,59 @@ async def mark_found_and_announce_locked(
     zone_display_name = zone["display_name"]
     subzone_display_name = zone["subzones"][subzone_key]["display_name"]
     spawn_due = zone["spawn_due_marked"]
-    refs = zone["scouting_messages"]
+    refs_by_guild = group_refs_by_guild(zone["scouting_messages"])
     domain.mark_found(storage.data, zone_key)
     await storage.save()
 
-    announce_channel: discord.abc.Messageable | None = None
-    for index, ref in enumerate(refs):
-        try:
-            channel = bot.get_channel(ref["channel_id"])
-            if channel is None:
-                channel = await bot.fetch_channel(ref["channel_id"])
-            message = await channel.fetch_message(ref["message_id"])
-            # Finding isn't killing: leave the kill button enabled so
-            # whoever actually gets the kill can still report it.
-            disabled_view = ScoutingView(
-                bot,
-                zone_key,
-                ref["subzone_keys"],
-                show_kill_button=True,
-                scout_disabled=True,
-                found_disabled=True,
-            )
-            if index == 0:
-                announce_channel = channel
-                done_embed = build_scouting_embed(storage, zone_key, spawn_due=spawn_due)
-                done_embed.title = strings.scouting_done_title(zone_display_name)
-                done_embed.add_field(
-                    name="​",
-                    value=strings.scouting_found_note(subzone_display_name),
-                    inline=False,
+    done_embed = build_scouting_embed(storage, zone_key, spawn_due=spawn_due)
+    done_embed.title = strings.scouting_done_title(zone_display_name)
+    done_embed.add_field(
+        name="​", value=strings.scouting_found_note(subzone_display_name), inline=False
+    )
+
+    # Every installed guild gets its own copy of the scouting messages
+    # disabled and its own Elite Found announcement, pinged with its own
+    # alert role.
+    new_found_refs: list[dict] = []
+    for guild_id, refs in refs_by_guild.items():
+        announce_channel: discord.abc.Messageable | None = None
+        for index, ref in enumerate(refs):
+            try:
+                channel = bot.get_channel(ref["channel_id"])
+                if channel is None:
+                    channel = await bot.fetch_channel(ref["channel_id"])
+                message = await channel.fetch_message(ref["message_id"])
+                # Finding isn't killing: leave the kill button enabled so
+                # whoever actually gets the kill can still report it.
+                disabled_view = ScoutingView(
+                    bot,
+                    zone_key,
+                    ref["subzone_keys"],
+                    show_kill_button=True,
+                    scout_disabled=True,
+                    found_disabled=True,
                 )
-                await message.edit(embed=done_embed, view=disabled_view)
-            else:
-                await message.edit(view=disabled_view)
-        except discord.HTTPException as exc:
-            logger.warning("Failed to disable scouting buttons for %s: %s", zone_key, exc)
+                if index == 0:
+                    announce_channel = channel
+                    await message.edit(embed=done_embed, view=disabled_view)
+                else:
+                    await message.edit(view=disabled_view)
+            except discord.HTTPException as exc:
+                logger.warning("Failed to disable scouting buttons for %s: %s", zone_key, exc)
 
-    if announce_channel is None and refs:
-        try:
-            announce_channel = bot.get_channel(refs[0]["channel_id"])
-            if announce_channel is None:
-                announce_channel = await bot.fetch_channel(refs[0]["channel_id"])
-        except discord.HTTPException:
-            announce_channel = None
+        if announce_channel is None and refs:
+            try:
+                announce_channel = bot.get_channel(refs[0]["channel_id"])
+                if announce_channel is None:
+                    announce_channel = await bot.fetch_channel(refs[0]["channel_id"])
+            except discord.HTTPException:
+                announce_channel = None
 
-    if announce_channel is not None:
-        role_id = storage.data["config"]["alert_role_id"]
+        if announce_channel is None:
+            continue
+
+        guild_config = storage.data["guilds"].get(str(guild_id))
+        role_id = guild_config["alert_role_id"] if guild_config else None
         role_mention = f"<@&{role_id}>" if role_id else None
         found_embed, found_file = build_elite_found_embed(storage, zone_key, subzone_key)
         found_view = FoundAnnouncementView(bot, zone_key, subzone_key)
@@ -380,11 +409,17 @@ async def mark_found_and_announce_locked(
         except discord.HTTPException as exc:
             logger.warning("Failed to send elite-found announcement for %s: %s", zone_key, exc)
         else:
-            zone["found_announcement_message"] = {
-                "channel_id": announce_channel.id,
-                "message_id": announcement_message.id,
-            }
-            await storage.save()
+            new_found_refs.append(
+                {
+                    "guild_id": guild_id,
+                    "channel_id": announce_channel.id,
+                    "message_id": announcement_message.id,
+                }
+            )
+
+    if new_found_refs:
+        zone["found_announcement_messages"] = new_found_refs
+        await storage.save()
 
     return zone
 
@@ -485,16 +520,23 @@ class ScoutingView(discord.ui.View):
             updated_embed = build_scouting_embed(
                 storage, self.zone_key, spawn_due=zone["spawn_due_marked"]
             )
-            refs = zone["scouting_messages"]
-            primary_ref = refs[0] if refs else None
+            # One primary (embed-carrying) ref per installed guild — a scout
+            # report is shared state, so every guild's own copy needs the
+            # refreshed embed, not just the one that was clicked.
+            primary_refs = [
+                refs[0] for refs in group_refs_by_guild(zone["scouting_messages"]).values()
+            ]
 
-        is_primary_message = (
-            primary_ref is not None
-            and interaction.message is not None
-            and interaction.message.id == primary_ref["message_id"]
+        clicked_primary_ref = next(
+            (
+                ref
+                for ref in primary_refs
+                if interaction.message is not None and interaction.message.id == ref["message_id"]
+            ),
+            None,
         )
 
-        if is_primary_message:
+        if clicked_primary_ref is not None:
             try:
                 await interaction.response.edit_message(embed=updated_embed, view=self)
             except discord.HTTPException as exc:
@@ -506,8 +548,11 @@ class ScoutingView(discord.ui.View):
                 logger.warning(
                     "Failed to acknowledge scouting click for %s: %s", self.zone_key, exc
                 )
-            if primary_ref is not None:
-                await self._edit_message(primary_ref, embed=updated_embed)
+
+        for ref in primary_refs:
+            if ref is clicked_primary_ref:
+                continue
+            await self._edit_message(ref, embed=updated_embed)
 
         confirmation = (
             strings.scout_confirmed(subzone_display_name, zone_display_name)
@@ -609,7 +654,7 @@ class FoundAnnouncementView(discord.ui.View):
             )
 
         # record_kill_and_close_scouting deletes this very announcement
-        # message (tracked as found_announcement_message) as part of closing
+        # message (tracked in found_announcement_messages) as part of closing
         # out the zone's cycle, so there's nothing left here to disable/edit.
         zone_state = await record_kill_and_close_scouting(
             self.bot, self.zone_key, self.subzone_key, interaction.user.id, str(interaction.user)
@@ -631,9 +676,10 @@ class FoundAnnouncementView(discord.ui.View):
 
             zone_display_name = zone["display_name"]
             spawn_due = zone["spawn_due_marked"]
-            refs = zone["scouting_messages"]
+            refs_by_guild = group_refs_by_guild(zone["scouting_messages"])
+            found_refs = list(zone["found_announcement_messages"])
             zone["found_this_cycle"] = False
-            zone["found_announcement_message"] = None
+            zone["found_announcement_messages"] = []
             await storage.save()
 
         try:
@@ -643,30 +689,30 @@ class FoundAnnouncementView(discord.ui.View):
                 "Failed to acknowledge elite-found undo click for %s: %s", self.zone_key, exc
             )
 
-        for index, ref in enumerate(refs):
-            try:
-                channel = self.bot.get_channel(ref["channel_id"])
-                if channel is None:
-                    channel = await self.bot.fetch_channel(ref["channel_id"])
-                message = await channel.fetch_message(ref["message_id"])
-                view = ScoutingView(
-                    self.bot, self.zone_key, ref["subzone_keys"], show_kill_button=spawn_due
-                )
-                if index == 0:
-                    embed = build_scouting_embed(storage, self.zone_key, spawn_due=spawn_due)
-                    await message.edit(embed=embed, view=view)
-                else:
-                    await message.edit(view=view)
-            except discord.HTTPException as exc:
-                logger.warning(
-                    "Failed to re-enable scouting buttons for %s: %s", self.zone_key, exc
-                )
+        # "Found" is shared state: undoing it re-enables scouting and drops
+        # the announcement in every installed guild, not just the one whose
+        # button was clicked.
+        for refs in refs_by_guild.values():
+            for index, ref in enumerate(refs):
+                try:
+                    channel = self.bot.get_channel(ref["channel_id"])
+                    if channel is None:
+                        channel = await self.bot.fetch_channel(ref["channel_id"])
+                    message = await channel.fetch_message(ref["message_id"])
+                    view = ScoutingView(
+                        self.bot, self.zone_key, ref["subzone_keys"], show_kill_button=spawn_due
+                    )
+                    if index == 0:
+                        embed = build_scouting_embed(storage, self.zone_key, spawn_due=spawn_due)
+                        await message.edit(embed=embed, view=view)
+                    else:
+                        await message.edit(view=view)
+                except discord.HTTPException as exc:
+                    logger.warning(
+                        "Failed to re-enable scouting buttons for %s: %s", self.zone_key, exc
+                    )
 
-        try:
-            await interaction.message.delete()
-        except discord.HTTPException as exc:
-            logger.warning(
-                "Failed to delete elite-found announcement for %s: %s", self.zone_key, exc
-            )
+        for ref in found_refs:
+            await _delete_tracked_message(self.bot, self.zone_key, ref, "elite-found announcement")
 
         await send_ephemeral(interaction, strings.found_undone(zone_display_name))

@@ -294,6 +294,10 @@ def zone_list_entry(display_name: str, subzone_names: list[str]) -> str:
 
 ZONE_NOT_FOUND = "Unknown zone. Pick one from the autocomplete list."
 NO_PERMISSION = "You need the **Manage Server** permission or the configured admin role to use this command."
+OWNER_GUILD_ONLY = (
+    "This command is only available on the main server, since it changes settings shared by "
+    "every server this bot is installed on."
+)
 GENERIC_ERROR = "Something went wrong handling that command. Check the bot logs for details."
 GUILD_ONLY = "This command can only be used inside the server."
 

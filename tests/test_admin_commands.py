@@ -348,4 +348,103 @@ class TestFallbackSyncCommands:
         content, _ = interaction.followup.sent[0]
         assert content.count("\n") == len(bot.storage.data["zones"])  # header + one line each
         assert "Nix" in content and "updated" in content
-        assert bot.perpetual.force_update_calls == 1
+
+
+class TestOwnerGuildGating:
+    async def test_shared_state_command_succeeds_on_the_owner_guild(self, bot):
+        cog = _cog(bot)
+        bot.perpetual = _FakePerpetual()
+        interaction = FakeInteraction(guild_id=bot.owner_guild_id)
+
+        await cog.cooldown.callback(cog, interaction, "nix", "5h")
+
+        assert bot.storage.data["zones"]["nix"]["cooldown_minutes"] == 300
+
+    async def test_shared_state_command_rejected_on_a_non_owner_guild(self, bot):
+        from bot import strings
+
+        cog = _cog(bot)
+        interaction = FakeInteraction(guild_id=bot.owner_guild_id + 1)
+
+        await cog.cooldown.callback(cog, interaction, "nix", "5h")
+
+        assert bot.storage.data["zones"]["nix"]["cooldown_minutes"] != 300
+        content, _ = interaction.response.send_message_calls[0]
+        assert content == strings.OWNER_GUILD_ONLY
+
+    async def test_fallback_group_is_owner_guild_only(self, bot, monkeypatch):
+        from bot import strings
+
+        # interaction_check also gates on admin access, which needs a real
+        # discord.Member (not exercised by any fake here) — stub it out so
+        # this test isolates the new owner-guild half of the check.
+        monkeypatch.setattr(
+            "bot.cogs.admin_commands._has_admin_access", lambda interaction, bot: True
+        )
+        cog = _cog(bot)
+        group = cog.fallback_group
+        interaction = FakeInteraction(guild_id=bot.owner_guild_id + 1)
+
+        allowed = await group.interaction_check(interaction)
+
+        assert allowed is False
+        assert bot.storage.data["config"]["fallback_enabled"] is False
+        content, _ = interaction.response.send_message_calls[0]
+        assert content == strings.OWNER_GUILD_ONLY
+
+    async def test_per_guild_commands_are_not_owner_gated(self, bot):
+        # channel/alert-channel/alert-role/admin-role/show/repost are settings
+        # for whichever server the command is run on, so any installed
+        # guild's admin may use them.
+        cog = _cog(bot)
+        bot.perpetual = _FakePerpetual()
+        interaction = FakeInteraction(guild_id=bot.owner_guild_id + 1)
+        canal = discord.Object(id=123456)
+        canal.mention = "#canal"
+
+        await cog.channel.callback(cog, interaction, canal)
+
+        assert bot.storage.data["guilds"][str(bot.owner_guild_id + 1)]["channel_id"] == 123456
+
+
+class TestPerGuildConfigCommands:
+    async def test_channel_is_scoped_to_the_calling_guild(self, bot):
+        cog = _cog(bot)
+        bot.perpetual = _FakePerpetual()
+        other_guild_id = bot.owner_guild_id + 1
+        canal = discord.Object(id=123456)
+        canal.mention = "#canal"
+
+        await cog.channel.callback(cog, FakeInteraction(guild_id=other_guild_id), canal)
+
+        assert bot.storage.data["guilds"][str(other_guild_id)]["channel_id"] == 123456
+        # the owner guild's own config (seeded by the bot fixture) is untouched
+        assert bot.storage.data["guilds"][str(bot.owner_guild_id)]["channel_id"] != 123456
+
+    async def test_show_reflects_the_calling_guilds_own_settings(self, bot):
+        cog = _cog(bot)
+        other_guild_id = bot.owner_guild_id + 1
+        role = discord.Object(id=777)
+        role.mention = "@Hunters"
+        await cog.alert_role.callback(cog, FakeInteraction(guild_id=other_guild_id), role)
+
+        interaction = FakeInteraction(guild_id=other_guild_id)
+        await cog.show.callback(cog, interaction)
+
+        embed = interaction.response.send_message_calls[0][1]["embed"]
+        general_field = next(f for f in embed.fields if f.name == "General")
+        assert "@Hunters" in general_field.value or "<@&777>" in general_field.value
+
+    async def test_repost_reports_no_channel_when_this_guild_has_none_configured(self, bot):
+        from bot import strings
+
+        cog = _cog(bot)
+        bot.perpetual = _FakePerpetual()
+        other_guild_id = bot.owner_guild_id + 1  # never configured a channel
+        interaction = FakeInteraction(guild_id=other_guild_id)
+
+        await cog.repost.callback(cog, interaction)
+
+        content, _ = interaction.response.send_message_calls[0]
+        assert content == strings.config_repost_no_channel()
+        assert bot.perpetual.force_update_calls == 0

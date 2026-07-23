@@ -21,7 +21,7 @@ from bot.constants import MAPS_DIR
 from bot.fallback import FallbackSyncResult, check_and_apply_found, sync_zone_from_fallback
 from bot.models import ZoneState
 from bot.perpetual_message import PerpetualMessageManager
-from bot.scouting import ScoutingView, build_scouting_embed, chunk_subzone_keys
+from bot.scouting import ScoutingView, build_scouting_embed, chunk_subzone_keys, group_refs_by_guild
 from bot.storage import Storage
 
 logger = logging.getLogger(__name__)
@@ -86,16 +86,16 @@ class AlertManager:
         # resynced from the fallback source even if no channel is configured.
         await self._check_fallback(bot, now)
 
-        config = self.storage.data["config"]
-        channel_id = config["alert_channel_id"] or config["channel_id"]
-        if channel_id is None:
+        if not any(
+            g["alert_channel_id"] or g["channel_id"] for g in self.storage.data["guilds"].values()
+        ):
             return
 
         # Scanning for due zones touches no network/lock — this loop has no
         # `await`, so it's already atomic with respect to other coroutines
         # and doesn't need to be inside any lock.
         due: list[tuple[str, str]] = []
-        offset_seconds = config["alert_offset_minutes"] * 60
+        offset_seconds = self.storage.data["config"]["alert_offset_minutes"] * 60
         for key, zone in self.storage.data["zones"].items():
             if zone["spawn_at"] is None:
                 continue
@@ -107,17 +107,6 @@ class AlertManager:
         if not due:
             return
 
-        channel = bot.get_channel(channel_id)
-        if channel is None:
-            try:
-                channel = await bot.fetch_channel(channel_id)
-            except discord.HTTPException:
-                logger.warning(strings.LOG_CHANNEL_MISSING, channel_id)
-                return
-
-        role_id = config["alert_role_id"]
-        role_mention = f"<@&{role_id}>" if role_id else None
-
         # Each zone is processed under its own lock (mutate + save + the
         # network calls for that zone), so one zone's alert never blocks a
         # command or button click for another zone.
@@ -128,7 +117,7 @@ class AlertManager:
                 if zone is None:
                     continue  # removed mid-cycle by an admin
                 if kind == "pre":
-                    sent = await self._send_pre_alert(bot, channel, key, zone, role_mention)
+                    sent = await self._send_pre_alert(bot, key, zone)
                 else:
                     sent = await self._mark_spawn_due(bot, key, zone)
                 if sent:
@@ -138,97 +127,120 @@ class AlertManager:
         if sent_any:
             self.perpetual.mark_dirty()
 
-    async def _send_pre_alert(
-        self,
-        bot: discord.Client,
-        channel: discord.abc.Messageable,
-        zone_key: str,
-        zone: ZoneState,
-        role_mention: str | None,
-    ) -> bool:
+    async def _send_pre_alert(self, bot: discord.Client, zone_key: str, zone: ZoneState) -> bool:
+        """Posts the scouting alert into every installed guild's own alert
+        channel (falling back to its status channel), each getting its own
+        copy of the embed/buttons and its own role ping — a guild with no
+        channel configured yet is silently skipped."""
         embed = build_scouting_embed(self.storage, zone_key)
         map_path = MAPS_DIR / f"{zone_key}.png"
-        file = discord.File(map_path, filename=f"{zone_key}.png") if map_path.exists() else None
-
         chunks = chunk_subzone_keys(zone)
-        primary_view = ScoutingView(bot, zone_key, chunks[0]) if chunks else None
 
-        try:
-            send_kwargs: dict = {"content": role_mention, "embed": embed}
-            if file is not None:
-                send_kwargs["file"] = file
-            if primary_view is not None:
-                send_kwargs["view"] = primary_view
-            primary_message = await channel.send(**send_kwargs)
-        except discord.Forbidden:
-            logger.warning(strings.LOG_MISSING_PERMISSIONS, "send an alert", getattr(channel, "id", "?"))
-            return False
-        except discord.HTTPException as exc:
-            logger.warning("Failed to send alert for %s: %s", zone_key, exc)
-            return False
+        scouting_messages: list[dict] = []
+        for guild_id_str, guild_config in self.storage.data["guilds"].items():
+            channel_id = guild_config["alert_channel_id"] or guild_config["channel_id"]
+            if channel_id is None:
+                continue
+            guild_id = int(guild_id_str)
 
-        # Always track the primary message, even with zero sub-zones (no
-        # view sent), so a later spawn_due/found/kill edit can still find it.
-        scouting_messages: list[dict] = [
-            {
-                "channel_id": getattr(channel, "id"),
-                "message_id": primary_message.id,
-                "subzone_keys": chunks[0] if chunks else [],
-            }
-        ]
+            channel = bot.get_channel(channel_id)
+            if channel is None:
+                try:
+                    channel = await bot.fetch_channel(channel_id)
+                except discord.HTTPException:
+                    logger.warning(strings.LOG_CHANNEL_MISSING, channel_id)
+                    continue
 
-        for chunk in chunks[1:]:
-            continuation_view = ScoutingView(bot, zone_key, chunk)
+            role_id = guild_config["alert_role_id"]
+            role_mention = f"<@&{role_id}>" if role_id else None
+            file = discord.File(map_path, filename=f"{zone_key}.png") if map_path.exists() else None
+            primary_view = ScoutingView(bot, zone_key, chunks[0]) if chunks else None
+
             try:
-                continuation_message = await channel.send(view=continuation_view)
+                send_kwargs: dict = {"content": role_mention, "embed": embed}
+                if file is not None:
+                    send_kwargs["file"] = file
+                if primary_view is not None:
+                    send_kwargs["view"] = primary_view
+                primary_message = await channel.send(**send_kwargs)
             except discord.Forbidden:
-                logger.warning(
-                    strings.LOG_MISSING_PERMISSIONS,
-                    "send a scouting continuation message",
-                    getattr(channel, "id", "?"),
-                )
+                logger.warning(strings.LOG_MISSING_PERMISSIONS, "send an alert", channel_id)
                 continue
             except discord.HTTPException as exc:
                 logger.warning(
-                    "Failed to send scouting continuation message for %s: %s", zone_key, exc
+                    "Failed to send alert for %s in guild %s: %s", zone_key, guild_id, exc
                 )
                 continue
 
+            # Always track the primary message, even with zero sub-zones (no
+            # view sent), so a later spawn_due/found/kill edit can still find it.
             scouting_messages.append(
                 {
-                    "channel_id": getattr(channel, "id"),
-                    "message_id": continuation_message.id,
-                    "subzone_keys": chunk,
+                    "guild_id": guild_id,
+                    "channel_id": channel_id,
+                    "message_id": primary_message.id,
+                    "subzone_keys": chunks[0] if chunks else [],
                 }
             )
+
+            for chunk in chunks[1:]:
+                continuation_view = ScoutingView(bot, zone_key, chunk)
+                try:
+                    continuation_message = await channel.send(view=continuation_view)
+                except discord.Forbidden:
+                    logger.warning(
+                        strings.LOG_MISSING_PERMISSIONS,
+                        "send a scouting continuation message",
+                        channel_id,
+                    )
+                    continue
+                except discord.HTTPException as exc:
+                    logger.warning(
+                        "Failed to send scouting continuation message for %s: %s", zone_key, exc
+                    )
+                    continue
+
+                scouting_messages.append(
+                    {
+                        "guild_id": guild_id,
+                        "channel_id": channel_id,
+                        "message_id": continuation_message.id,
+                        "subzone_keys": chunk,
+                    }
+                )
+
+        if not scouting_messages:
+            return False
 
         zone["scouting_messages"] = scouting_messages
         zone["pre_alert_sent"] = True
         return True
 
     async def _mark_spawn_due(self, bot: discord.Client, zone_key: str, zone: ZoneState) -> bool:
-        """Silently edits the zone's existing scouting message(s) to add an
-        "Elite killed" button per row, instead of sending a new alert."""
+        """Silently edits the zone's existing scouting message(s) — in every
+        guild that has one — to add an "Elite killed" button per row,
+        instead of sending a new alert."""
         if zone["found_this_cycle"]:
             # Already further along (someone found it) — don't clobber that
             # state, just stop this from being re-checked every 30s.
             zone["spawn_due_marked"] = True
             return True
 
-        for index, ref in enumerate(zone["scouting_messages"]):
-            try:
-                channel = bot.get_channel(ref["channel_id"])
-                if channel is None:
-                    channel = await bot.fetch_channel(ref["channel_id"])
-                message = await channel.fetch_message(ref["message_id"])
-                view = ScoutingView(bot, zone_key, ref["subzone_keys"], show_kill_button=True)
-                if index == 0:
-                    embed = build_scouting_embed(self.storage, zone_key, spawn_due=True)
-                    await message.edit(embed=embed, view=view)
-                else:
-                    await message.edit(view=view)
-            except discord.HTTPException as exc:
-                logger.warning("Failed to mark spawn due for %s: %s", zone_key, exc)
+        for guild_refs in group_refs_by_guild(zone["scouting_messages"]).values():
+            for index, ref in enumerate(guild_refs):
+                try:
+                    channel = bot.get_channel(ref["channel_id"])
+                    if channel is None:
+                        channel = await bot.fetch_channel(ref["channel_id"])
+                    message = await channel.fetch_message(ref["message_id"])
+                    view = ScoutingView(bot, zone_key, ref["subzone_keys"], show_kill_button=True)
+                    if index == 0:
+                        embed = build_scouting_embed(self.storage, zone_key, spawn_due=True)
+                        await message.edit(embed=embed, view=view)
+                    else:
+                        await message.edit(view=view)
+                except discord.HTTPException as exc:
+                    logger.warning("Failed to mark spawn due for %s: %s", zone_key, exc)
 
         zone["spawn_due_marked"] = True
         return True

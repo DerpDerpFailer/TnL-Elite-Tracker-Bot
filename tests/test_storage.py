@@ -97,8 +97,6 @@ def test_migrates_v1_data_up_to_current(tmp_path):
 
     assert storage.data["version"] == SCHEMA_VERSION
     laslan = storage.data["zones"]["laslan"]
-    # v2: alert_channel_id
-    assert laslan is not None and "alert_channel_id" in storage.data["config"]
     # v3: known zones get their sub-zones backfilled
     assert len(laslan["subzones"]) == 7
     # v4: window_start/window_end collapsed into spawn_at
@@ -109,11 +107,15 @@ def test_migrates_v1_data_up_to_current(tmp_path):
     # v7: last_kill_subzone / found_this_cycle
     assert laslan["last_kill_subzone"] is None
     assert laslan["found_this_cycle"] is False
-    # v8: found_announcement_message
-    assert laslan["found_announcement_message"] is None
+    # v8/v15: found_announcement_message(s)
+    assert laslan["found_announcement_messages"] == []
     # v9: start_alert_sent renamed to spawn_due_marked
     assert "start_alert_sent" not in laslan
     assert laslan["spawn_due_marked"] is False
+    # v15: per-guild settings moved out of the shared config; with no
+    # owner_guild_id passed to load_or_seed, there's nowhere to file them
+    assert "channel_id" not in storage.data["config"]
+    assert storage.data["guilds"] == {}
     # v11: no more standalone 'syleus' zone
     assert "syleus" not in storage.data["zones"]
     # v12: fallback-timer settings
@@ -163,14 +165,14 @@ def test_migration_preserves_existing_pending_kill_state(tmp_path):
     path.write_text(json.dumps(old_v6))
 
     storage = Storage(path=path, backup_path=backup)
-    storage.load_or_seed()
+    storage.load_or_seed(owner_guild_id=123)
 
     nix = storage.data["zones"]["nix"]
     assert nix["last_kill_at"] == 1000.0
     assert nix["spawn_at"] == 22600.0
     assert nix["spawn_due_marked"] is True  # renamed from start_alert_sent, value preserved
     assert nix["scouting_messages"] == [
-        {"channel_id": 999, "message_id": 1001, "subzone_keys": ["frozen-nightlands"]}
+        {"guild_id": 123, "channel_id": 999, "message_id": 1001, "subzone_keys": ["frozen-nightlands"]}
     ]
 
 

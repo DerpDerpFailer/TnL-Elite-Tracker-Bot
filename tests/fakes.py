@@ -4,7 +4,17 @@ without a live gateway connection. Mirrors just enough of discord.py's shape
 bot/scouting.py and bot/interactions.py to exercise their real logic."""
 from __future__ import annotations
 
+import discord
+
+from bot.models import build_guild_config
+
 _next_message_id = 100_000
+
+# Most tests exercise exactly one installed guild — FakeBot registers this as
+# its owner guild (and channel_id, by default) so single-guild test call
+# sites don't need to wire that up by hand. Multi-guild tests pass their own
+# guild ids and/or call add_channel/register additional guilds explicitly.
+DEFAULT_GUILD_ID = 42
 
 
 class FakeMessage:
@@ -89,24 +99,61 @@ class FakeUser:
         return self._tag
 
 
+class _FakeErrorResponse:
+    status = 404
+    reason = "Not Found"
+    headers = {}
+
+
 class FakeInteraction:
-    def __init__(self, message: FakeMessage | None = None, user: FakeUser | None = None) -> None:
+    def __init__(
+        self,
+        message: FakeMessage | None = None,
+        user: FakeUser | None = None,
+        guild_id: int = DEFAULT_GUILD_ID,
+    ) -> None:
         self.response = FakeInteractionResponse()
         self.followup = FakeFollowup()
         self.message = message
         self.user = user or FakeUser()
+        self.guild_id = guild_id
 
 
 class FakeBot:
-    """Minimal stand-in for EliteBot: only what bot/scouting.py needs
-    (.storage, .get_channel, .fetch_channel)."""
+    """Minimal stand-in for EliteBot: only what bot/scouting.py & friends need
+    (.storage, .owner_guild_id, .get_channel, .fetch_channel).
 
-    def __init__(self, storage, channel: FakeChannel) -> None:
+    By default also registers `channel` as DEFAULT_GUILD_ID's configured
+    channel (status + alert), since most tests exercise exactly one
+    installed guild — pass register_guild=False to start with no guild
+    installed/configured, or call add_channel/register more guilds by hand
+    for multi-guild scenarios."""
+
+    def __init__(
+        self,
+        storage,
+        channel: FakeChannel,
+        *,
+        owner_guild_id: int = DEFAULT_GUILD_ID,
+        register_guild: bool = True,
+    ) -> None:
         self.storage = storage
-        self._channel = channel
+        self.owner_guild_id = owner_guild_id
+        self._channels: dict[int, FakeChannel] = {channel.id: channel}
+        if register_guild:
+            guild_config = storage.data["guilds"].setdefault(
+                str(owner_guild_id), build_guild_config()
+            )
+            guild_config["channel_id"] = channel.id
+
+    def add_channel(self, channel: FakeChannel) -> None:
+        self._channels[channel.id] = channel
 
     def get_channel(self, channel_id: int):
-        return self._channel if channel_id == self._channel.id else None
+        return self._channels.get(channel_id)
 
     async def fetch_channel(self, channel_id: int):
-        return self._channel
+        channel = self._channels.get(channel_id)
+        if channel is None:
+            raise discord.HTTPException(_FakeErrorResponse(), "Unknown channel")
+        return channel

@@ -5,8 +5,22 @@ import time
 from bot import domain
 from bot.alerts import FALLBACK_RETRY_SECONDS, AlertManager
 from bot.fallback import FallbackSyncResult
+from bot.models import build_guild_config
 from bot.perpetual_message import PerpetualMessageManager
 from tests.fakes import FakeBot, FakeChannel
+
+_OTHER_GUILD_ID = 999
+
+
+def _add_second_guild(storage, bot) -> FakeChannel:
+    """Registers a second installed guild with its own channel, for tests
+    exercising the mutualized fan-out across servers."""
+    other_channel = FakeChannel(channel_id=222)
+    bot.add_channel(other_channel)
+    guild_config = build_guild_config()
+    guild_config["channel_id"] = other_channel.id
+    storage.data["guilds"][str(_OTHER_GUILD_ID)] = guild_config
+    return other_channel
 
 
 def _manager(storage) -> AlertManager:
@@ -82,10 +96,9 @@ class TestCheckFallback:
         assert call_count["n"] == first_call_count
 
     async def test_runs_even_without_any_alert_channel_configured(self, storage, channel, monkeypatch):
-        assert storage.data["config"]["channel_id"] is None
-        assert storage.data["config"]["alert_channel_id"] is None
+        assert storage.data["guilds"] == {}
         storage.data["config"]["fallback_enabled"] = True
-        bot = FakeBot(storage, channel)
+        bot = FakeBot(storage, channel, register_guild=False)
         mgr = _manager(storage)
         called = {"n": 0}
 
@@ -228,3 +241,51 @@ class TestCheckFoundWatch:
         _make_zone_watchable(storage, "nix", spawn_at=2000.0)
         await mgr.check_found_watch(bot)
         assert mgr._found_watch_state["nix"]["attempts"] == 1  # back in the fast phase
+
+
+class TestMultiGuildFanOut:
+    async def test_pre_alert_posts_a_copy_into_every_installed_guilds_channel(
+        self, storage, channel, bot
+    ):
+        other_channel = _add_second_guild(storage, bot)
+        mgr = _manager(storage)
+        domain.record_kill(storage.data, "nix", 1000.0, 1, "tester")
+        zone = storage.data["zones"]["nix"]
+
+        await mgr._send_pre_alert(bot, "nix", zone)
+
+        assert len(channel.sent) == 1
+        assert len(other_channel.sent) == 1
+        guild_ids = {ref["guild_id"] for ref in zone["scouting_messages"]}
+        assert guild_ids == {bot.owner_guild_id, _OTHER_GUILD_ID}
+
+    async def test_spawn_due_edits_every_installed_guilds_primary_message(
+        self, storage, channel, bot
+    ):
+        other_channel = _add_second_guild(storage, bot)
+        mgr = _manager(storage)
+        domain.record_kill(storage.data, "nix", 1000.0, 1, "tester")
+        zone = storage.data["zones"]["nix"]
+        await mgr._send_pre_alert(bot, "nix", zone)
+
+        await mgr._mark_spawn_due(bot, "nix", zone)
+
+        primary_msg = channel.messages[zone["scouting_messages"][0]["message_id"]]
+        other_ref = next(r for r in zone["scouting_messages"] if r["guild_id"] == _OTHER_GUILD_ID)
+        other_primary_msg = other_channel.messages[other_ref["message_id"]]
+        assert "Spawn Due" in primary_msg.edits[-1]["embed"].title
+        assert "Spawn Due" in other_primary_msg.edits[-1]["embed"].title
+
+    async def test_a_guild_with_no_channel_configured_is_silently_skipped(
+        self, storage, channel, bot
+    ):
+        storage.data["guilds"][str(_OTHER_GUILD_ID)] = build_guild_config()  # channel_id stays None
+        mgr = _manager(storage)
+        domain.record_kill(storage.data, "nix", 1000.0, 1, "tester")
+        zone = storage.data["zones"]["nix"]
+
+        await mgr._send_pre_alert(bot, "nix", zone)
+
+        assert len(channel.sent) == 1
+        guild_ids = {ref["guild_id"] for ref in zone["scouting_messages"]}
+        assert guild_ids == {bot.owner_guild_id}

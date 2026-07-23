@@ -13,13 +13,12 @@ from bot.slugs import slugify
 
 
 class Config(TypedDict):
-    channel_id: int | None
-    alert_channel_id: int | None
-    alert_role_id: int | None
+    """Settings shared by every installed guild, since they describe the one
+    mutualized boss-timer state (not any particular server's presentation of
+    it) — see GuildConfig below for the per-guild settings."""
+
     alert_offset_minutes: int
     timezone: str
-    perpetual_message_id: int | None
-    admin_role_id: int | None
     fallback_enabled: bool
     fallback_server: str
     fallback_threshold_minutes: int
@@ -28,18 +27,33 @@ class Config(TypedDict):
     fallback_found_watch_slow_interval_minutes: int
 
 
+class GuildConfig(TypedDict):
+    """Per-installed-guild settings: which channels/roles *this* server wants
+    used, and its own copy of the perpetual status message. Keyed by
+    str(guild_id) in RootData.guilds — created empty on install (see
+    bot/main.py's on_guild_join) and filled in via /elite-config."""
+
+    channel_id: int | None
+    alert_channel_id: int | None
+    alert_role_id: int | None
+    admin_role_id: int | None
+    perpetual_message_id: int | None
+
+
 class SubzoneState(TypedDict):
     display_name: str
     scouts: list[int]
 
 
 class ScoutingMessageRef(TypedDict):
+    guild_id: int
     channel_id: int
     message_id: int
     subzone_keys: list[str]
 
 
 class MessageRef(TypedDict):
+    guild_id: int
     channel_id: int
     message_id: int
 
@@ -56,7 +70,7 @@ class ZoneState(TypedDict):
     found_this_cycle: bool
     subzones: dict[str, SubzoneState]
     scouting_messages: list[ScoutingMessageRef]
-    found_announcement_message: MessageRef | None
+    found_announcement_messages: list[MessageRef]
 
 
 HistoryEventType = Literal["kill", "noshow"]
@@ -77,6 +91,7 @@ class UndoEntry(TypedDict):
 class RootData(TypedDict):
     version: int
     config: Config
+    guilds: dict[str, GuildConfig]
     zones: dict[str, ZoneState]
     history: dict[str, list[HistoryEntry]]
     undo: dict[str, UndoEntry]
@@ -91,6 +106,16 @@ class ZonePhase(str, Enum):
 
 def build_subzone_state(display_name: str) -> SubzoneState:
     return SubzoneState(display_name=display_name, scouts=[])
+
+
+def build_guild_config() -> GuildConfig:
+    return GuildConfig(
+        channel_id=None,
+        alert_channel_id=None,
+        alert_role_id=None,
+        admin_role_id=None,
+        perpetual_message_id=None,
+    )
 
 
 def build_zone_state(
@@ -112,7 +137,7 @@ def build_zone_state(
             slugify(name): build_subzone_state(name) for name in (subzone_names or [])
         },
         scouting_messages=[],
-        found_announcement_message=None,
+        found_announcement_messages=[],
     )
 
 
@@ -124,13 +149,8 @@ def build_seed_data() -> RootData:
     return RootData(
         version=SCHEMA_VERSION,
         config=Config(
-            channel_id=None,
-            alert_channel_id=None,
-            alert_role_id=None,
             alert_offset_minutes=15,
             timezone="Europe/Paris",
-            perpetual_message_id=None,
-            admin_role_id=None,
             fallback_enabled=False,
             fallback_server="sacred",
             fallback_threshold_minutes=5,
@@ -138,6 +158,7 @@ def build_seed_data() -> RootData:
             fallback_found_watch_attempts=10,
             fallback_found_watch_slow_interval_minutes=15,
         ),
+        guilds={},
         zones={
             slug: build_zone_state(
                 meta["display_name"], meta["cooldown_minutes"], DEFAULT_SUBZONES.get(slug)

@@ -243,7 +243,7 @@ class TestSyncZoneFromFallback:
         bot = FakeBot(storage, channel)
         mgr = AlertManager(storage, PerpetualMessageManager(storage))
         zone = storage.data["zones"]["nix"]
-        await mgr._send_pre_alert(bot, channel, "nix", zone, role_mention=None)
+        await mgr._send_pre_alert(bot, "nix", zone)
         primary_msg = channel.messages[zone["scouting_messages"][0]["message_id"]]
         assert primary_msg.deleted is False
 
@@ -412,7 +412,7 @@ class TestCheckAndApplyFound:
     ):
         mgr = AlertManager(storage, PerpetualMessageManager(storage))
         zone = storage.data["zones"]["nix"]
-        await mgr._send_pre_alert(bot, channel, "nix", zone, role_mention=None)
+        await mgr._send_pre_alert(bot, "nix", zone)
 
         async def fake_fetch(server_key, zone_key, **kwargs):
             return "scar-of-sacrifice"

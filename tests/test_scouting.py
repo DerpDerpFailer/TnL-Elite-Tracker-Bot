@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from bot import domain, strings
 from bot.alerts import AlertManager
-from bot.models import build_seed_data, build_zone_state
+from bot.models import build_guild_config, build_seed_data, build_zone_state
 from bot.perpetual_message import PerpetualMessageManager
 from bot.scouting import (
     NO_SUBZONE_KEY,
@@ -12,7 +12,20 @@ from bot.scouting import (
     build_scouting_embed,
     chunk_subzone_keys,
 )
-from tests.fakes import FakeInteraction, FakeUser
+from tests.fakes import FakeChannel, FakeInteraction, FakeUser
+
+_OTHER_GUILD_ID = 999
+
+
+def _add_second_guild(storage, bot) -> FakeChannel:
+    """Registers a second installed guild with its own channel, for tests
+    exercising the mutualized fan-out across servers."""
+    other_channel = FakeChannel(channel_id=222)
+    bot.add_channel(other_channel)
+    guild_config = build_guild_config()
+    guild_config["channel_id"] = other_channel.id
+    storage.data["guilds"][str(_OTHER_GUILD_ID)] = guild_config
+    return other_channel
 
 
 class TestChunkSubzoneKeys:
@@ -94,7 +107,7 @@ class TestScoutingViewLayout:
 
 async def _send_pre_alert(mgr, bot, channel, zone_key):
     zone = bot.storage.data["zones"][zone_key]
-    await mgr._send_pre_alert(bot, channel, zone_key, zone, role_mention=None)
+    await mgr._send_pre_alert(bot, zone_key, zone)
     return zone
 
 
@@ -133,7 +146,7 @@ class TestFoundAndUndo:
         await view._on_found_click(FakeInteraction(message=primary_msg), subzone_key)
 
         assert zone["found_this_cycle"] is True
-        assert zone["found_announcement_message"] is not None
+        assert zone["found_announcement_messages"] != []
         final_view = primary_msg.edits[-1]["view"]
         by_emoji = {str(item.emoji): item.disabled for item in final_view.children if item.emoji}
         assert by_emoji["📍"] is True
@@ -151,12 +164,12 @@ class TestFoundAndUndo:
         view = primary_msg.edits[-1]["view"]
         await view._on_found_click(FakeInteraction(message=primary_msg), subzone_key)
 
-        found_msg = channel.messages[zone["found_announcement_message"]["message_id"]]
+        found_msg = channel.messages[zone["found_announcement_messages"][0]["message_id"]]
         found_view = channel.sent[-1]["view"]
         await found_view._on_undo_click(FakeInteraction(message=found_msg))
 
         assert zone["found_this_cycle"] is False
-        assert zone["found_announcement_message"] is None
+        assert zone["found_announcement_messages"] == []
         assert found_msg.deleted is True
         reenabled_view = primary_msg.edits[-1]["view"]
         assert all(not item.disabled for item in reenabled_view.children)
@@ -175,7 +188,7 @@ class TestFoundAndUndo:
         view = primary_msg.edits[-1]["view"]
         await view._on_found_click(FakeInteraction(message=primary_msg), subzone_key)
 
-        found_msg = channel.messages[zone["found_announcement_message"]["message_id"]]
+        found_msg = channel.messages[zone["found_announcement_messages"][0]["message_id"]]
         found_view = channel.sent[-1]["view"]
         killer = FakeUser(user_id=777, tag="Killer#0002")
         await found_view._on_kill_click(FakeInteraction(message=found_msg, user=killer))
@@ -191,7 +204,7 @@ class TestFoundAndUndo:
         assert values["Next spawn"] == strings.boss_killed_next_spawn_value(int(zone["spawn_at"]))
         # the zone is reset for the next cycle
         assert zone["scouting_messages"] == []
-        assert zone["found_announcement_message"] is None
+        assert zone["found_announcement_messages"] == []
         assert zone["found_this_cycle"] is False
 
 
@@ -217,3 +230,69 @@ class TestKillFromScoutingMessage:
         assert primary_msg.deleted is True
         assert continuation_msg.deleted is True
         assert zone["last_kill_subzone"] == subzone_name
+
+
+class TestMultiGuildFanOut:
+    async def test_scout_click_refreshes_every_installed_guilds_embed(
+        self, bot, storage, channel
+    ):
+        other_channel = _add_second_guild(storage, bot)
+        mgr = AlertManager(storage, PerpetualMessageManager(storage))
+        domain.record_kill(storage.data, "nix", 1000.0, 1, "tester")
+        zone = await _send_pre_alert(mgr, bot, channel, "nix")
+
+        primary_msg = channel.messages[zone["scouting_messages"][0]["message_id"]]
+        other_ref = next(r for r in zone["scouting_messages"] if r["guild_id"] == _OTHER_GUILD_ID)
+        other_primary_msg = other_channel.messages[other_ref["message_id"]]
+        subzone_key = list(zone["subzones"].keys())[0]
+
+        view = channel.sent[0]["view"]
+        await view._on_scout_click(FakeInteraction(message=primary_msg), subzone_key)
+
+        assert zone["subzones"][subzone_key]["scouts"] == [FakeUser().id]
+        # the OTHER guild's primary message got a background refresh too, since a
+        # scout report is shared state across every installed server
+        assert other_primary_msg.edits
+        assert "Number of Scouts: 1" in other_primary_msg.edits[-1]["embed"].fields[0].value
+
+    async def test_found_click_announces_in_every_installed_guild_with_its_own_role(
+        self, bot, storage, channel
+    ):
+        other_channel = _add_second_guild(storage, bot)
+        storage.data["guilds"][str(_OTHER_GUILD_ID)]["alert_role_id"] = 555
+        mgr = AlertManager(storage, PerpetualMessageManager(storage))
+        domain.record_kill(storage.data, "nix", 1000.0, 1, "tester")
+        zone = await _send_pre_alert(mgr, bot, channel, "nix")
+        await mgr._mark_spawn_due(bot, "nix", zone)
+
+        primary_msg = channel.messages[zone["scouting_messages"][0]["message_id"]]
+        subzone_key = list(zone["subzones"].keys())[0]
+        view = primary_msg.edits[-1]["view"]
+        await view._on_found_click(FakeInteraction(message=primary_msg), subzone_key)
+
+        assert len(zone["found_announcement_messages"]) == 2
+        assert {ref["guild_id"] for ref in zone["found_announcement_messages"]} == {
+            bot.owner_guild_id,
+            _OTHER_GUILD_ID,
+        }
+        own_announcement = channel.sent[-1]
+        other_announcement = other_channel.sent[-1]
+        assert own_announcement["content"] is None  # no role configured for the owner guild
+        assert other_announcement["content"] == "<@&555>"
+
+    async def test_kill_posts_a_boss_killed_summary_in_every_installed_guild(
+        self, bot, storage, channel
+    ):
+        other_channel = _add_second_guild(storage, bot)
+        mgr = AlertManager(storage, PerpetualMessageManager(storage))
+        domain.record_kill(storage.data, "nix", 1000.0, 1, "tester")
+        zone = await _send_pre_alert(mgr, bot, channel, "nix")
+        await mgr._mark_spawn_due(bot, "nix", zone)
+
+        primary_msg = channel.messages[zone["scouting_messages"][0]["message_id"]]
+        subzone_key = list(zone["subzones"].keys())[0]
+        view = primary_msg.edits[-1]["view"]
+        await view._on_kill_click(FakeInteraction(message=primary_msg), subzone_key)
+
+        assert channel.sent[-1]["embed"].title == "\U0001f480 Boss killed"
+        assert other_channel.sent[-1]["embed"].title == "\U0001f480 Boss killed"

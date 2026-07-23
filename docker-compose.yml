@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN}
-      GUILD_ID: ${GUILD_ID}
+      OWNER_GUILD_ID: ${OWNER_GUILD_ID}
     volumes:
       - elite-data:/data
 

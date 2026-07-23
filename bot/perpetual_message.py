@@ -89,49 +89,57 @@ class PerpetualMessageManager:
         await self.force_update(bot, now)
 
     async def _sync(self, bot: discord.Client, now: float) -> None:
-        config = self.storage.data["config"]
-        channel_id = config["channel_id"]
-        if channel_id is None:
-            return
-
-        channel = bot.get_channel(channel_id)
-        if channel is None:
-            try:
-                channel = await bot.fetch_channel(channel_id)
-            except discord.HTTPException as exc:
-                logger.warning(strings.LOG_CHANNEL_MISSING, channel_id)
-                logger.debug("fetch_channel failed: %s", exc)
-                return
-
+        """Every installed guild with a channel configured gets its own copy
+        of the status embed, tracked under its own perpetual_message_id — the
+        embed content itself is shared (same zones/timers for everyone)."""
         embed = build_status_embed(self.storage, now)
-        message_id = config["perpetual_message_id"]
+        any_created = False
 
-        if message_id is not None:
+        for guild_config in self.storage.data["guilds"].values():
+            channel_id = guild_config["channel_id"]
+            if channel_id is None:
+                continue
+
+            channel = bot.get_channel(channel_id)
+            if channel is None:
+                try:
+                    channel = await bot.fetch_channel(channel_id)
+                except discord.HTTPException as exc:
+                    logger.warning(strings.LOG_CHANNEL_MISSING, channel_id)
+                    logger.debug("fetch_channel failed: %s", exc)
+                    continue
+
+            message_id = guild_config["perpetual_message_id"]
+
+            if message_id is not None:
+                try:
+                    message = await channel.fetch_message(message_id)
+                    await message.edit(embed=embed)
+                    continue
+                except discord.NotFound:
+                    logger.warning(strings.LOG_PERPETUAL_MESSAGE_MISSING, message_id, channel_id)
+                except discord.Forbidden:
+                    logger.warning(
+                        strings.LOG_MISSING_PERMISSIONS, "edit the perpetual message", channel_id
+                    )
+                    continue
+                except discord.HTTPException as exc:
+                    logger.warning("Failed to edit perpetual message: %s", exc)
+                    continue
+
             try:
-                message = await channel.fetch_message(message_id)
-                await message.edit(embed=embed)
-                return
-            except discord.NotFound:
-                logger.warning(strings.LOG_PERPETUAL_MESSAGE_MISSING, message_id, channel_id)
+                new_message = await channel.send(embed=embed)
             except discord.Forbidden:
                 logger.warning(
-                    strings.LOG_MISSING_PERMISSIONS, "edit the perpetual message", channel_id
+                    strings.LOG_MISSING_PERMISSIONS, "send the perpetual message", channel_id
                 )
-                return
+                continue
             except discord.HTTPException as exc:
-                logger.warning("Failed to edit perpetual message: %s", exc)
-                return
+                logger.warning("Failed to (re)create perpetual message: %s", exc)
+                continue
 
-        try:
-            new_message = await channel.send(embed=embed)
-        except discord.Forbidden:
-            logger.warning(
-                strings.LOG_MISSING_PERMISSIONS, "send the perpetual message", channel_id
-            )
-            return
-        except discord.HTTPException as exc:
-            logger.warning("Failed to (re)create perpetual message: %s", exc)
-            return
+            guild_config["perpetual_message_id"] = new_message.id
+            any_created = True
 
-        config["perpetual_message_id"] = new_message.id
-        await self.storage.save()
+        if any_created:
+            await self.storage.save()

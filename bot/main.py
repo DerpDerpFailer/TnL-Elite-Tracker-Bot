@@ -15,6 +15,7 @@ from bot.alerts import AlertManager
 from bot.config import load_env_config
 from bot.default_maps import seed_default_maps
 from bot.interactions import send_ephemeral
+from bot.models import build_guild_config
 from bot.perpetual_message import PerpetualMessageManager
 from bot.scouting import FoundAnnouncementView, ScoutingView, chunk_subzone_keys
 from bot.storage import Storage
@@ -28,20 +29,26 @@ EXTENSIONS = (
 
 
 class EliteBot(commands.Bot):
-    """Single-guild bot: no privileged intents needed since everything here is
-    slash commands, and commands are synced directly to `guild_id` for instant
-    registration instead of waiting on global command propagation."""
+    """Multi-guild installable bot: no privileged intents needed since
+    everything here is slash commands. Commands are synced per-guild (once
+    per installed guild, on first on_ready and again on any later
+    on_guild_join) rather than globally, so registration is still instant
+    instead of waiting on global command propagation."""
 
-    def __init__(self, guild_id: int) -> None:
+    def __init__(self, owner_guild_id: int) -> None:
         intents = discord.Intents.default()
         super().__init__(command_prefix=commands.when_mentioned, intents=intents)
-        self.guild_id = guild_id
+        self.owner_guild_id = owner_guild_id
         self.storage = Storage()
         self.perpetual = PerpetualMessageManager(self.storage)
         self.alerts = AlertManager(self.storage, self.perpetual)
+        self._synced_guilds = False
 
     async def setup_hook(self) -> None:
-        self.storage.load_or_seed()
+        # Guild membership isn't available yet at this point (populated by
+        # the READY event, which fires after this) — command sync happens in
+        # on_ready instead, see below.
+        self.storage.load_or_seed(owner_guild_id=self.owner_guild_id)
 
         copied = seed_default_maps()
         if copied:
@@ -67,13 +74,46 @@ class EliteBot(commands.Bot):
         for extension in EXTENSIONS:
             await self.load_extension(extension)
 
-        guild = discord.Object(id=self.guild_id)
-        self.tree.copy_global_to(guild=guild)
-        await self.tree.sync(guild=guild)
-        logger.info("Synced application commands to guild %s", self.guild_id)
+    async def _ensure_guild_registered(self, guild: discord.Guild) -> None:
+        """Seeds an empty guilds[...] config entry for a guild we haven't
+        seen before (fresh install, or one that joined while offline), so
+        /elite-config channel etc. have something to write into right away."""
+        async with self.storage.lock:
+            guilds = self.storage.data["guilds"]
+            if str(guild.id) not in guilds:
+                guilds[str(guild.id)] = build_guild_config()
+                await self.storage.save()
+
+    async def _sync_commands_to(self, guild: discord.Guild) -> None:
+        guild_ref = discord.Object(id=guild.id)
+        self.tree.copy_global_to(guild=guild_ref)
+        await self.tree.sync(guild=guild_ref)
+
+    async def on_guild_join(self, guild: discord.Guild) -> None:
+        logger.info("Joined guild %s (%s)", guild.name, guild.id)
+        await self._ensure_guild_registered(guild)
+        try:
+            await self._sync_commands_to(guild)
+        except discord.HTTPException as exc:
+            logger.warning("Failed to sync commands to newly joined guild %s: %s", guild.id, exc)
 
     async def on_ready(self) -> None:
         logger.info("Logged in as %s (id=%s)", self.user, self.user.id if self.user else "?")
+
+        for guild in self.guilds:
+            await self._ensure_guild_registered(guild)
+
+        # discord.py may call on_ready again after a reconnect; command sync
+        # only needs to happen once per process, not on every reconnect.
+        if not self._synced_guilds:
+            for guild in self.guilds:
+                try:
+                    await self._sync_commands_to(guild)
+                except discord.HTTPException as exc:
+                    logger.warning("Failed to sync commands to guild %s: %s", guild.id, exc)
+            logger.info("Synced application commands to %d guild(s)", len(self.guilds))
+            self._synced_guilds = True
+
         # Reconcile the perpetual message immediately: find it by stored ID,
         # recreate it if missing, and replay any alert flags already set.
         await self.perpetual.force_update(self, time.time())
@@ -96,7 +136,7 @@ async def main() -> None:
     configure_logging()
     env = load_env_config()
 
-    bot = EliteBot(guild_id=env.guild_id)
+    bot = EliteBot(owner_guild_id=env.owner_guild_id)
 
     @bot.tree.error
     async def on_app_command_error(

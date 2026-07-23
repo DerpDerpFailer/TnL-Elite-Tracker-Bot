@@ -24,6 +24,7 @@ from bot.constants import MAPS_DIR
 from bot.default_maps import restore_bundled_defaults_for_zone
 from bot.fallback import SERVER_DISPLAY_NAMES, FallbackSyncResult, sync_zone_from_fallback
 from bot.interactions import send_ephemeral, send_reply
+from bot.models import build_guild_config
 from bot.timeutil import get_zoneinfo, parse_duration_to_minutes
 
 if TYPE_CHECKING:
@@ -35,14 +36,37 @@ logger = logging.getLogger(__name__)
 _MAX_PREVIEW_EMBEDS_PER_MESSAGE = 10
 
 
+def _guild_config(bot: "EliteBot", guild_id: int) -> dict:
+    """Fetches (lazily creating if missing) the per-guild settings dict for
+    `guild_id`. Missing entries shouldn't normally happen — bot/main.py
+    seeds one on install/on_ready — but a command firing before that runs is
+    handled gracefully rather than raising."""
+    return bot.storage.data["guilds"].setdefault(str(guild_id), build_guild_config())
+
+
 def _has_admin_access(interaction: discord.Interaction, bot: "EliteBot") -> bool:
     member = interaction.user
     if not isinstance(member, discord.Member):
         return False
     if member.guild_permissions.manage_guild:
         return True
-    admin_role_id = bot.storage.data["config"]["admin_role_id"]
+    if interaction.guild_id is None:
+        return False
+    guild_config = bot.storage.data["guilds"].get(str(interaction.guild_id))
+    admin_role_id = guild_config["admin_role_id"] if guild_config else None
     return admin_role_id is not None and any(role.id == admin_role_id for role in member.roles)
+
+
+async def _check_owner_guild(interaction: discord.Interaction, bot: "EliteBot") -> bool:
+    """True (and no side effect) if this interaction is on the owner guild;
+    otherwise sends the rejection message itself and returns False, so a
+    caller can just `if not await _check_owner_guild(...): return`. Guards
+    every command that mutates the shared zone/cooldown/map/fallback state,
+    since that state is mutualized across every installed server."""
+    if interaction.guild_id == bot.owner_guild_id:
+        return True
+    await send_ephemeral(interaction, strings.OWNER_GUILD_ONLY)
+    return False
 
 
 class FallbackConfigGroup(app_commands.Group):
@@ -61,10 +85,12 @@ class FallbackConfigGroup(app_commands.Group):
         # Duplicated rather than inherited from AdminConfigGroup: a Group's
         # interaction_check isn't looked up through its parent chain by
         # discord.py, only through binding, so this must be self-contained.
-        if _has_admin_access(interaction, self.bot):
-            return True
-        await send_ephemeral(interaction, strings.NO_PERMISSION)
-        return False
+        if not _has_admin_access(interaction, self.bot):
+            await send_ephemeral(interaction, strings.NO_PERMISSION)
+            return False
+        # Every command in this group edits the shared fallback/found-watch
+        # settings, so the whole group is owner-guild-only.
+        return await _check_owner_guild(interaction, self.bot)
 
     @app_commands.command(
         name="enabled",
@@ -212,6 +238,8 @@ class AdminConfigGroup(app_commands.Group):
     @app_commands.describe(zone="Zone to update", duree="Cooldown duration, e.g. '4h' or '5h30'")
     @app_commands.autocomplete(zone=zone_autocomplete)
     async def cooldown(self, interaction: discord.Interaction, zone: str, duree: str) -> None:
+        if not await _check_owner_guild(interaction, self.bot):
+            return
         storage = self.bot.storage
         async with storage.zone_lock(zone):
             if zone not in storage.data["zones"]:
@@ -230,14 +258,15 @@ class AdminConfigGroup(app_commands.Group):
         await self.bot.perpetual.force_update(self.bot, time.time())
 
     @app_commands.command(
-        name="channel", description="Set the channel for the perpetual status message"
+        name="channel", description="Set the channel for this server's perpetual status message"
     )
     @app_commands.describe(canal="Channel to post/update the status message in")
     async def channel(self, interaction: discord.Interaction, canal: discord.TextChannel) -> None:
         storage = self.bot.storage
         async with storage.lock:
-            storage.data["config"]["channel_id"] = canal.id
-            storage.data["config"]["perpetual_message_id"] = None
+            guild_config = _guild_config(self.bot, interaction.guild_id)
+            guild_config["channel_id"] = canal.id
+            guild_config["perpetual_message_id"] = None
             await storage.save()
 
         await send_ephemeral(interaction, strings.config_channel_updated(canal.mention))
@@ -245,7 +274,7 @@ class AdminConfigGroup(app_commands.Group):
 
     @app_commands.command(
         name="alert-channel",
-        description="Set (or clear) a separate channel for spawn alerts",
+        description="Set (or clear) a separate channel for this server's spawn alerts",
     )
     @app_commands.describe(
         canal="Channel for pre-alert/spawn-open alerts; omit to use the status channel instead"
@@ -255,7 +284,8 @@ class AdminConfigGroup(app_commands.Group):
     ) -> None:
         storage = self.bot.storage
         async with storage.lock:
-            storage.data["config"]["alert_channel_id"] = canal.id if canal else None
+            guild_config = _guild_config(self.bot, interaction.guild_id)
+            guild_config["alert_channel_id"] = canal.id if canal else None
             await storage.save()
 
         if canal is not None:
@@ -264,7 +294,7 @@ class AdminConfigGroup(app_commands.Group):
             await send_ephemeral(interaction, strings.config_alert_channel_cleared())
 
     @app_commands.command(
-        name="alert-role", description="Set (or clear) the role pinged in alerts"
+        name="alert-role", description="Set (or clear) the role pinged in this server's alerts"
     )
     @app_commands.describe(role="Role to mention in alerts; omit to clear (no ping)")
     async def alert_role(
@@ -272,7 +302,8 @@ class AdminConfigGroup(app_commands.Group):
     ) -> None:
         storage = self.bot.storage
         async with storage.lock:
-            storage.data["config"]["alert_role_id"] = role.id if role else None
+            guild_config = _guild_config(self.bot, interaction.guild_id)
+            guild_config["alert_role_id"] = role.id if role else None
             await storage.save()
 
         if role is not None:
@@ -281,7 +312,8 @@ class AdminConfigGroup(app_commands.Group):
             await send_ephemeral(interaction, strings.config_alert_role_cleared())
 
     @app_commands.command(
-        name="admin-role", description="Set (or clear) the role allowed to use /elite-config"
+        name="admin-role",
+        description="Set (or clear) the role allowed to use /elite-config on this server",
     )
     @app_commands.describe(role="Role allowed to manage the tracker; omit to clear")
     async def admin_role(
@@ -289,7 +321,8 @@ class AdminConfigGroup(app_commands.Group):
     ) -> None:
         storage = self.bot.storage
         async with storage.lock:
-            storage.data["config"]["admin_role_id"] = role.id if role else None
+            guild_config = _guild_config(self.bot, interaction.guild_id)
+            guild_config["admin_role_id"] = role.id if role else None
             await storage.save()
 
         if role is not None:
@@ -304,6 +337,8 @@ class AdminConfigGroup(app_commands.Group):
     async def alert_offset(
         self, interaction: discord.Interaction, minutes: app_commands.Range[int, 1, 180]
     ) -> None:
+        if not await _check_owner_guild(interaction, self.bot):
+            return
         storage = self.bot.storage
         async with storage.lock:
             storage.data["config"]["alert_offset_minutes"] = minutes
@@ -316,6 +351,8 @@ class AdminConfigGroup(app_commands.Group):
     )
     @app_commands.describe(tz="IANA timezone name, e.g. Europe/Paris")
     async def timezone(self, interaction: discord.Interaction, tz: str) -> None:
+        if not await _check_owner_guild(interaction, self.bot):
+            return
         try:
             get_zoneinfo(tz)
         except ZoneInfoNotFoundError:
@@ -338,6 +375,8 @@ class AdminConfigGroup(app_commands.Group):
     async def set_map(
         self, interaction: discord.Interaction, zone: str, image: discord.Attachment
     ) -> None:
+        if not await _check_owner_guild(interaction, self.bot):
+            return
         storage = self.bot.storage
         if zone not in storage.data["zones"]:
             await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
@@ -359,6 +398,8 @@ class AdminConfigGroup(app_commands.Group):
         nom="Display name for the new zone", cooldown="Cooldown duration, e.g. '4h' or '5h30'"
     )
     async def zone_add(self, interaction: discord.Interaction, nom: str, cooldown: str) -> None:
+        if not await _check_owner_guild(interaction, self.bot):
+            return
         storage = self.bot.storage
         async with storage.lock:
             try:
@@ -384,6 +425,8 @@ class AdminConfigGroup(app_commands.Group):
         description="Add any built-in default zone (with its sub-zones) missing from this server",
     )
     async def sync_zones(self, interaction: discord.Interaction) -> None:
+        if not await _check_owner_guild(interaction, self.bot):
+            return
         storage = self.bot.storage
         async with storage.lock:
             added = domain.sync_default_zones(storage.data)
@@ -400,6 +443,8 @@ class AdminConfigGroup(app_commands.Group):
     @app_commands.describe(zone="Zone to remove")
     @app_commands.autocomplete(zone=zone_autocomplete)
     async def zone_remove(self, interaction: discord.Interaction, zone: str) -> None:
+        if not await _check_owner_guild(interaction, self.bot):
+            return
         storage = self.bot.storage
         async with storage.lock:
             if zone not in storage.data["zones"]:
@@ -429,6 +474,8 @@ class AdminConfigGroup(app_commands.Group):
     @app_commands.describe(zone="Zone to reset")
     @app_commands.autocomplete(zone=zone_autocomplete)
     async def zone_reset(self, interaction: discord.Interaction, zone: str) -> None:
+        if not await _check_owner_guild(interaction, self.bot):
+            return
         storage = self.bot.storage
         async with storage.zone_lock(zone):
             if zone not in storage.data["zones"]:
@@ -448,6 +495,8 @@ class AdminConfigGroup(app_commands.Group):
     )
     @app_commands.autocomplete(zone=zone_autocomplete)
     async def subzone_add(self, interaction: discord.Interaction, zone: str, nom: str) -> None:
+        if not await _check_owner_guild(interaction, self.bot):
+            return
         storage = self.bot.storage
         async with storage.zone_lock(zone):
             if zone not in storage.data["zones"]:
@@ -478,6 +527,8 @@ class AdminConfigGroup(app_commands.Group):
     async def subzone_remove(
         self, interaction: discord.Interaction, zone: str, subzone: str
     ) -> None:
+        if not await _check_owner_guild(interaction, self.bot):
+            return
         storage = self.bot.storage
         async with storage.zone_lock(zone):
             if zone not in storage.data["zones"]:
@@ -518,6 +569,8 @@ class AdminConfigGroup(app_commands.Group):
         subzone: str,
         image: discord.Attachment,
     ) -> None:
+        if not await _check_owner_guild(interaction, self.bot):
+            return
         storage = self.bot.storage
         if zone not in storage.data["zones"]:
             await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
@@ -638,6 +691,8 @@ class AdminConfigGroup(app_commands.Group):
     @app_commands.describe(zone="Zone to reset the maps for")
     @app_commands.autocomplete(zone=zone_autocomplete)
     async def reset_maps(self, interaction: discord.Interaction, zone: str) -> None:
+        if not await _check_owner_guild(interaction, self.bot):
+            return
         storage = self.bot.storage
         if zone not in storage.data["zones"]:
             await send_ephemeral(interaction, strings.ZONE_NOT_FOUND)
@@ -653,10 +708,11 @@ class AdminConfigGroup(app_commands.Group):
 
     @app_commands.command(
         name="repost",
-        description="Recreate the perpetual status message if it was deleted, or force a refresh",
+        description="Recreate this server's perpetual status message if it was deleted, or force a refresh",
     )
     async def repost(self, interaction: discord.Interaction) -> None:
-        if self.bot.storage.data["config"]["channel_id"] is None:
+        guild_config = _guild_config(self.bot, interaction.guild_id)
+        if guild_config["channel_id"] is None:
             await send_ephemeral(interaction, strings.config_repost_no_channel())
             return
 
@@ -667,13 +723,18 @@ class AdminConfigGroup(app_commands.Group):
     async def show(self, interaction: discord.Interaction) -> None:
         storage = self.bot.storage
         config = storage.data["config"]
+        guild_config = _guild_config(self.bot, interaction.guild_id)
 
-        channel_mention = f"<#{config['channel_id']}>" if config["channel_id"] else None
+        channel_mention = f"<#{guild_config['channel_id']}>" if guild_config["channel_id"] else None
         alert_channel_mention = (
-            f"<#{config['alert_channel_id']}>" if config["alert_channel_id"] else None
+            f"<#{guild_config['alert_channel_id']}>" if guild_config["alert_channel_id"] else None
         )
-        alert_role_mention = f"<@&{config['alert_role_id']}>" if config["alert_role_id"] else None
-        admin_role_mention = f"<@&{config['admin_role_id']}>" if config["admin_role_id"] else None
+        alert_role_mention = (
+            f"<@&{guild_config['alert_role_id']}>" if guild_config["alert_role_id"] else None
+        )
+        admin_role_mention = (
+            f"<@&{guild_config['admin_role_id']}>" if guild_config["admin_role_id"] else None
+        )
 
         general_lines = [
             strings.config_show_channel_line(channel_mention),

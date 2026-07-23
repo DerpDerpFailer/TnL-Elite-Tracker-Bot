@@ -31,7 +31,7 @@ from pathlib import Path
 
 from bot import strings
 from bot.constants import BACKUP_FILE, DATA_FILE, DEFAULT_SUBZONES, SCHEMA_VERSION
-from bot.models import RootData, build_seed_data, build_subzone_state
+from bot.models import RootData, build_guild_config, build_seed_data, build_subzone_state
 from bot.scouting import chunk_subzone_keys
 from bot.slugs import slugify
 
@@ -98,14 +98,18 @@ class Storage:
             self._zone_locks[zone_key] = lock
         return lock
 
-    def load_or_seed(self) -> None:
-        """Synchronous startup load. Must run before the bot logs in."""
+    def load_or_seed(self, owner_guild_id: int | None = None) -> None:
+        """Synchronous startup load. Must run before the bot logs in.
+
+        `owner_guild_id` is only consulted by the v14->v15 migration, to file
+        a pre-existing single-guild install's settings under the right
+        `guilds[...]` entry — see bot/config.py's OWNER_GUILD_ID."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
         loaded = self._try_read(self.path)
         if loaded is not None:
             self.data = loaded
-            self._migrate()
+            self._migrate(owner_guild_id)
             return
 
         if self.path.exists():
@@ -114,7 +118,7 @@ class Storage:
         loaded = self._try_read(self.backup_path)
         if loaded is not None:
             self.data = loaded
-            self._migrate()
+            self._migrate(owner_guild_id)
             logger.warning("Recovered data from backup file %s", self.backup_path)
             self._write_sync()
             return
@@ -137,7 +141,7 @@ class Storage:
             logger.warning("Failed to read %s: %s", path, exc)
             return None
 
-    def _migrate(self) -> None:
+    def _migrate(self, owner_guild_id: int | None = None) -> None:
         version = self.data.get("version", 0)
 
         if version < 2:
@@ -305,6 +309,53 @@ class Storage:
             config.setdefault("fallback_found_watch_attempts", 10)
             config.setdefault("fallback_found_watch_slow_interval_minutes", 15)
             version = 14
+
+        if version < 15:
+            # v15: the bot became multi-guild installable — settings that
+            # only make sense per-server (channel/alert-channel/alert-role/
+            # admin-role/perpetual-message) move out of the single shared
+            # `config` into `guilds[str(guild_id)]`, one entry per installed
+            # server; `config` keeps only the truly shared settings (zones'
+            # cooldowns, fallback/found-watch, offset, timezone). Likewise
+            # every zone's message refs now carry which guild they belong to.
+            config = self.data["config"]
+            old_channel_id = config.pop("channel_id", None)
+            old_alert_channel_id = config.pop("alert_channel_id", None)
+            old_alert_role_id = config.pop("alert_role_id", None)
+            old_admin_role_id = config.pop("admin_role_id", None)
+            old_perpetual_message_id = config.pop("perpetual_message_id", None)
+            guilds = self.data.setdefault("guilds", {})
+
+            if owner_guild_id is not None:
+                guild_config = guilds.setdefault(str(owner_guild_id), build_guild_config())
+                guild_config["channel_id"] = old_channel_id
+                guild_config["alert_channel_id"] = old_alert_channel_id
+                guild_config["alert_role_id"] = old_alert_role_id
+                guild_config["admin_role_id"] = old_admin_role_id
+                guild_config["perpetual_message_id"] = old_perpetual_message_id
+
+                for zone in self.data["zones"].values():
+                    for ref in zone.get("scouting_messages", []):
+                        ref.setdefault("guild_id", owner_guild_id)
+                    old_found_ref = zone.pop("found_announcement_message", None)
+                    found_refs = zone.setdefault("found_announcement_messages", [])
+                    if old_found_ref is not None:
+                        old_found_ref.setdefault("guild_id", owner_guild_id)
+                        found_refs.append(old_found_ref)
+            else:
+                # No OWNER_GUILD_ID available at migration time (bot/config.py
+                # always requires it in production; only reachable here from
+                # code that constructs Storage directly, e.g. tests/tools).
+                # A message ref with no guild_id would break every guild-
+                # scoped code path downstream, so drop rather than guess —
+                # same "unrecoverable, left for a fresh cycle" treatment as
+                # the v6 migration gives orphaned continuation messages.
+                for zone in self.data["zones"].values():
+                    zone["scouting_messages"] = []
+                    zone.pop("found_announcement_message", None)
+                    zone["found_announcement_messages"] = []
+
+            version = 15
 
         if version != SCHEMA_VERSION:
             logger.warning(
