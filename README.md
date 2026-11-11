@@ -175,9 +175,13 @@ python -m bot.main
 
 By default the bot reads/writes `/data/elite.json`, which only exists inside
 the container. For a genuinely local run outside Docker, either create
-`/data` locally (requires permissions) or run via `docker compose` as
-described below — that's the supported path for anything beyond a quick
-syntax check.
+`/data` locally (requires permissions) or run it in Docker with
+`docker compose up --build` (reads `.env`, uses the `elite-data` named
+volume) — that's the supported path for anything beyond a quick syntax
+check. A local `elite-data` volume created by an older, root-running image
+must be fixed first (`docker run --rm -v <project>_elite-data:/d alpine
+chown -R 1000:1000 /d`) or removed. Never run it with the production token
+while the deployed bot is up.
 
 ## Running tests
 
@@ -277,61 +281,73 @@ and there's no point hammering the endpoint waiting for that.
 ## Deploying with Portainer
 
 The bot is deployed as a **Portainer Stack of type "Repository"**, pointed at
-this GitHub repository, so redeploys are a matter of pulling the latest
-commit rather than pushing images by hand.
+this GitHub repository: Portainer clones the repo, builds the image from the
+`Dockerfile` and starts the `elite-tracker-bot` service (container
+`tnl-elite-bot`). The production instance runs on an Unraid server.
 
-### 1. Create a GitHub Personal Access Token (read-only)
+### Image and hardening
 
-Since this repository is private, Portainer needs a token to clone it:
+- Base image pinned (`python:3.12.x-slim`), direct dependencies pinned in
+  `requirements.txt`.
+- The bot runs as the unprivileged `app` user (UID/GID **1000**). `/data` is
+  created in the image with that owner, so a fresh named volume just works;
+  a **bind-mounted host folder must be owned by `1000:1000`** (the bot only
+  ever writes under `/data`).
+- The compose file drops every capability (`cap_drop: [ALL]`), sets
+  `no-new-privileges`, and caps the json-file logs at 3 × 10 MB.
 
-1. On GitHub, go to **Settings → Developer settings → Personal access
-   tokens → Fine-grained tokens → Generate new token**.
-2. **Repository access**: select "Only select repositories" and choose
-   `TnL-Elite-Tracker-Bot`.
-3. **Permissions**: under "Repository permissions", set **Contents** to
-   **Read-only**. Nothing else is required.
-4. Generate the token and copy it immediately (it won't be shown again).
+### Create the stack
 
-### 2. Create the Stack in Portainer
+1. In Portainer, go to **Stacks → Add stack**, build method **Repository**.
+2. **Repository URL**: `https://github.com/DerpDerpFailer/TnL-Elite-Tracker-Bot`
+   (public, no authentication needed), reference `refs/heads/main`, compose
+   path `docker-compose.yml`.
+3. **Environment variables**:
 
-1. In Portainer, go to **Stacks → Add stack**.
-2. **Build method**: select **Repository**.
-3. **Repository URL**: `https://github.com/<your-account>/TnL-Elite-Tracker-Bot`
-4. **Repository reference**: `refs/heads/main`
-5. **Compose path**: `docker-compose.yml`
-6. **Authentication**: enable it, and provide:
-   - **Username**: your GitHub username (or any placeholder — fine-grained
-     tokens authenticate by token, but GitHub still expects a username field)
-   - **Personal Access Token**: the token created above
-7. **Environment variables**: add
-   - `DISCORD_TOKEN` = your bot token
-   - `OWNER_GUILD_ID` = your owner server's guild ID (see
-     [Multi-server installs](#multi-server-installs))
+   | Variable | Required | Meaning |
+   |---|---|---|
+   | `DISCORD_TOKEN` | yes | Bot token (secret, never committed). |
+   | `OWNER_GUILD_ID` | yes | Owner server's guild ID, see [Multi-server installs](#multi-server-installs). |
+   | `ELITE_DATA_PATH` | no | Host folder bind-mounted at `/data` (owned by `1000:1000`), e.g. `/mnt/user/appdata/tnl-elite-bot/data`. Unset = named volume `elite-data`. |
+   | `BOT_REPLICAS` | no | `1` (default) runs the bot, `0` keeps the stack deployed without connecting to Discord. |
 
-   These are stack-level secrets in Portainer, **not** committed anywhere in
-   this repo — `docker-compose.yml` only references `${DISCORD_TOKEN}` and
-   `${OWNER_GUILD_ID}`.
-8. (Optional, recommended) Enable **GitOps updates** and set a **webhook** or
-   polling interval so the stack automatically redeploys whenever `main` is
-   pushed. If you skip this, use the manual "Pull and redeploy" button
-   described below.
-9. Click **Deploy the stack**.
+4. Leave **GitOps updates off**: deployments are done by hand (see below).
+5. Deploy the stack and check the logs for `Logged in as ...` and
+   `Synced application commands to N guild(s)`.
 
-Portainer will clone the repo, build the image from the `Dockerfile`, and
-start the `elite-tracker-bot` service with the named volume `elite-data`
-mounted at `/data` (a named volume is used deliberately — a relative bind
-mount doesn't work reliably with Portainer's git-based stacks, since the
-repo is checked out into an ephemeral location).
+> **Never run two instances on the same token.** Discord delivers each
+> interaction to only one of them and each has its own `elite.json`, so state
+> silently diverges. When moving the bot to another host, deploy the new
+> stack with `BOT_REPLICAS=0`, stop the old one, copy `/data`, then switch to
+> `BOT_REPLICAS=1`.
+
+### Backup and restore
+
+Everything lives in `/data` (`elite.json`, `elite.json.bak`, `maps/`), so
+backing up that folder is enough. On the Unraid host it is covered by the
+weekly Appdata Backup run;
+[`scripts/restore-tnl-elite-data-unraid.sh`](scripts/restore-tnl-elite-data-unraid.sh)
+restores it from the latest archive (or `--backup NAME` / `--from-dir DIR`).
+It is run from a workstation over SSH, **dry-run by default**:
+
+```bash
+ssh root@<unraid-host> 'bash -s -- --help' < scripts/restore-tnl-elite-data-unraid.sh
+ssh root@<unraid-host> 'bash -s --' < scripts/restore-tnl-elite-data-unraid.sh          # dry-run
+ssh root@<unraid-host> 'bash -s -- --apply' < scripts/restore-tnl-elite-data-unraid.sh  # restore
+```
+
+With `--apply` it validates `elite.json` with the bot's image, stops the bot,
+snapshots the current data to `data.before-restore-<date>`, copies, chowns to
+`1000:1000`, verifies checksums, restarts the bot and prints the rollback
+command.
 
 ## Updating the bot
 
-- **Manual**: after pushing to `main`, open the stack in Portainer and click
-  **Pull and redeploy** — this re-clones the repo at the latest commit,
-  rebuilds the image, and restarts the container. Data in `/data` is
-  untouched since it lives in the named volume, not the image.
-- **Automatic (optional)**: if you enabled GitOps/webhook updates when
-  creating the stack, Portainer redeploys automatically on every push to
-  `main` — no manual step needed.
+After pushing to `main`, open the stack in Portainer and click **Pull and
+redeploy** with **re-pull image** enabled — this re-clones the repo at the
+latest commit, rebuilds the image, and restarts the container. Data in
+`/data` is untouched since it lives outside the image. GitOps is off on
+purpose, so nothing redeploys on its own after a push.
 
 ## Command reference
 
