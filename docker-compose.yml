@@ -1,12 +1,30 @@
 services:
   elite-tracker-bot:
     build: .
+    container_name: tnl-elite-bot
     restart: unless-stopped
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN}
       OWNER_GUILD_ID: ${OWNER_GUILD_ID}
     volumes:
-      - elite-data:/data
+      # Named volume by default; set ELITE_DATA_PATH to a host folder
+      # (owned by 1000:1000) to bind-mount it instead, e.g. on Unraid.
+      - ${ELITE_DATA_PATH:-elite-data}:/data
+    # Set BOT_REPLICAS=0 to keep the stack deployed without connecting to
+    # Discord: never run two instances on the same token.
+    deploy:
+      replicas: ${BOT_REPLICAS:-1}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      - net.unraid.docker.icon=https://cdn.jsdelivr.net/gh/DerpDerpFailer/TnL-Elite-Tracker-Bot@main/icon/tnl-elite-256.png
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   elite-data:
